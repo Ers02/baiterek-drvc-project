@@ -1,0 +1,25 @@
+# Node.js / React / Vue / whatever
+node_modules/
+.env
+.env.local
+.env.development
+.env.production
+
+# Сборка
+/frontend/dist
+/frontend/build
+/backend/dist
+/backend/build
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
