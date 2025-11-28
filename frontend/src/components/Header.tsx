@@ -1,28 +1,35 @@
-// src/components/Header.tsx
-import { AppBar, Toolbar, Typography, Button, Box, ToggleButton, ToggleButtonGroup } from '@mui/material'
-import { useLang } from '../i18n'
+import { AppBar, Toolbar, Typography, Button, Box, Select, MenuItem, FormControl } from '@mui/material'
+import { useTranslation } from '../i18n'
+import { useNavigate } from 'react-router-dom'
 
 export default function Header() {
-  const [lang, changeLang] = useLang()
+  const { t, lang, setLang } = useTranslation()
+  const navigate = useNavigate()
 
   return (
     <AppBar position="static" color="primary" elevation={4}>
       <Toolbar sx={{ justifyContent: 'space-between' }}>
-        <Typography variant="h6" fontWeight="bold">
-          Портал финансирования
+        <Typography variant="h6" fontWeight="bold" sx={{ cursor: 'pointer' }} onClick={() => navigate('/')}>
+          Департамент развития внутристрановой ценности
         </Typography>
 
         <Box display="flex" alignItems="center" gap={3}>
-          <ToggleButtonGroup size="small" exclusive value={lang} onChange={(_, v) => v && changeLang(v)}>
-            <ToggleButton value="ru">РУС</ToggleButton>
-            <ToggleButton value="kk">ҚАЗ</ToggleButton>
-          </ToggleButtonGroup>
+          <FormControl size="small" variant="outlined">
+            <Select
+              value={lang}
+              onChange={(e) => setLang(e.target.value as 'ru' | 'kk')}
+              sx={{ color: 'white', '& .MuiOutlinedInput-notchedOutline': { borderColor: 'white' }, '& .MuiSvgIcon-root': { color: 'white' } }}
+            >
+              <MenuItem value="ru">РУС</MenuItem>
+              <MenuItem value="kk">ҚАЗ</MenuItem>
+            </Select>
+          </FormControl>
 
-          <Button color="inherit" href="/applications/new">
-            {lang === 'ru' ? 'Новая заявка' : 'Жаңа өтініш'}
+          <Button color="inherit" onClick={() => navigate('/application/new')}>
+            {t('new_application')}
           </Button>
-          <Button color="inherit" href="/">
-            {lang === 'ru' ? 'Мои заявки' : 'Менің өтініштерім'}
+          <Button color="inherit" onClick={() => navigate('/')}>
+            {t('my_applications')}
           </Button>
         </Box>
       </Toolbar>

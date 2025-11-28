@@ -13,7 +13,11 @@ import { Login as LoginIcon } from '@mui/icons-material'
 import api from '../services/api'
 import { useNavigate } from 'react-router-dom'
 
-export default function Login() {
+interface LoginProps {
+  setToken: (token: string) => void;
+}
+
+export default function Login({ setToken }: LoginProps) {
   const [iin, setIin] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -31,6 +35,7 @@ export default function Login() {
       setError('')
       const res = await api.post('/auth/login', { iin, password })
       localStorage.setItem('token', res.data.token)
+      setToken(res.data.token)
       navigate('/')
     } catch (err: any) {
       setError(err.response?.data?.message || 'Ошибка входа')

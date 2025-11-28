@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Tabs, Tab, Box, Button, Typography, Paper, Chip } from '@mui/material'
-import { Add as AddIcon, Download as DownloadIcon } from '@mui/icons-material'
+import { Download as DownloadIcon } from '@mui/icons-material'
 import api from '../services/api'
 import Header from '../components/Header'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from '../i18n'
 
 interface Application {
   id: number
@@ -11,14 +12,6 @@ interface Application {
   need_type: string
   state: string
   created_at: string
-}
-
-const stateLabels: Record<string, string> = {
-  draft: 'Черновик',
-  submitted: 'Подана',
-  pre_approved: 'Предодобрена',
-  bank_discussed: 'После банка',
-  final_approved: 'Окончательно одобрена'
 }
 
 const stateColors: Record<string, 'default' | 'primary' | 'secondary' | 'success' | 'warning'> = {
@@ -30,15 +23,24 @@ const stateColors: Record<string, 'default' | 'primary' | 'secondary' | 'success
 }
 
 export default function Dashboard() {
+  const { t } = useTranslation()
   const [tab, setTab] = useState(0)
   const [applications, setApplications] = useState<Application[]>([])
   const navigate = useNavigate()
 
   const states = ['draft', 'submitted', 'pre_approved', 'bank_discussed', 'final_approved']
+  
+  const stateLabels: Record<string, string> = {
+    draft: t('draft'),
+    submitted: t('submitted'),
+    pre_approved: t('pre_approved'),
+    bank_discussed: 'После банка', // TODO: Add translation
+    final_approved: 'Одобренные' // TODO: Add translation
+  }
 
   useEffect(() => {
     loadApplications()
-  }, [tab])
+  }, [tab, t]) // Add t to dependency array to re-render on lang change
 
   const loadApplications = async () => {
     try {
@@ -69,20 +71,13 @@ export default function Dashboard() {
       <Header />
       <Box sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-          <Typography variant="h5">Мои заявки</Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => navigate('/application/new')}
-          >
-            Новая заявка
-          </Button>
+          <Typography variant="h5">{t('my_applications')}</Typography>
         </Box>
 
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
-          <Tab label="Черновики" />
-          <Tab label="Поданные" />
-          <Tab label="Предодобренные" />
+          <Tab label={t('draft')} />
+          <Tab label={t('submitted_tab')} />
+          <Tab label={t('pre_approved')} />
           <Tab label="После банка" />
           <Tab label="Одобренные" />
         </Tabs>
@@ -90,7 +85,7 @@ export default function Dashboard() {
         <Box>
           {applications.length === 0 ? (
             <Paper sx={{ p: 4, textAlign: 'center' }}>
-              <Typography>Нет заявок в этом статусе</Typography>
+              <Typography>{t('no_applications_in_status')}</Typography>
             </Paper>
           ) : (
             applications.map(app => (

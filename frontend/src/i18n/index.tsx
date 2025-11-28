@@ -1,14 +1,22 @@
-// src/i18n/index.ts
-import { useState } from 'react'
+import { createContext, useState, useContext } from 'react';
+import type { PropsWithChildren } from 'react';
 
-export type Lang = 'ru' | 'kk'
+export type Lang = 'ru' | 'kk';
 
 const translations = {
   ru: {
-    create_application: 'Создание новой заявки',
-    edit_application: 'Заявка №{number}',
+    // Header
+    new_application: 'Новая заявка',
+    // Dashboard
+    my_applications: 'Мои заявки',
+    pre_approved: 'Предодобренные',
+    submitted_tab: 'Поданные',
+    no_applications_in_status: 'Нет заявок в этом статусе',
     draft: 'Черновик',
     submitted: 'Подана',
+    // ApplicationForm
+    create_application: 'Создание новой заявки',
+    edit_application: 'Заявка №{number}',
     enstru_search: '1. Код по ЕНС ТРУ (enstru.kz)',
     enstru_placeholder: 'Введите код или название...',
     enstru_data: 'Данные по коду ЕНС ТРУ',
@@ -45,10 +53,18 @@ const translations = {
     error_submit: 'Ошибка отправки на согласование',
   },
   kk: {
-    create_application: 'Жаңа өтініш құру',
-    edit_application: '№{number} өтініш',
+    // Header
+    new_application: 'Жаңа өтінім',
+    // Dashboard
+    my_applications: 'Менің өтінімдерім',
+    pre_approved: 'Алдын ала мақұлданған',
+    submitted_tab: 'Жіберілгендер',
+    no_applications_in_status: 'Бұл мәртебеде өтінімдер жоқ',
     draft: 'Жоба',
     submitted: 'Жіберілді',
+    // ApplicationForm
+    create_application: 'Жаңа өтініш құру',
+    edit_application: '№{number} өтініш',
     enstru_search: '1. ЕНС ТРУ коды (enstru.kz)',
     enstru_placeholder: 'Код немесе атауын енгізіңіз...',
     enstru_data: 'ЕНС ТРУ коды бойынша деректер',
@@ -84,31 +100,46 @@ const translations = {
     error_save: 'Сақтау қатесі',
     error_submit: 'Жіберу қатесі',
   },
+};
+
+type Translations = keyof typeof translations.ru;
+
+interface LangContextType {
+  lang: Lang;
+  setLang: (lang: Lang) => void;
+  t: (key: Translations, vars?: Record<string, string | number>) => string;
 }
 
-export const t = (key: keyof typeof translations.ru, vars?: Record<string, string | number>): string => {
-  const lang: Lang = (localStorage.getItem('lang') as Lang) || (navigator.language.startsWith('kk') ? 'kk' : 'ru')
-  let text: string = translations[lang][key] || translations.ru[key] || key
+const LangContext = createContext<LangContextType | undefined>(undefined);
 
-  if (vars) {
-    Object.entries(vars).forEach(([k, v]) => {
-      text = text.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v))
-    })
+export const LangProvider = ({ children }: PropsWithChildren) => {
+  const [lang, setLangState] = useState<Lang>(() => {
+    const saved = localStorage.getItem('lang') as Lang;
+    return saved || (navigator.language.startsWith('kk') ? 'kk' : 'ru');
+  });
+
+  const setLang = (l: Lang) => {
+    setLangState(l);
+    localStorage.setItem('lang', l);
+  };
+
+  const t = (key: Translations, vars?: Record<string, string | number>): string => {
+    let text: string = translations[lang]?.[key] || translations.ru[key] || String(key);
+    if (vars) {
+      Object.entries(vars).forEach(([k, v]) => {
+        text = text.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+      });
+    }
+    return text;
+  };
+
+  return <LangContext.Provider value={{ lang, setLang, t }}>{children}</LangContext.Provider>;
+};
+
+export const useTranslation = () => {
+  const context = useContext(LangContext);
+  if (!context) {
+    throw new Error('useTranslation must be used within a LangProvider');
   }
-
-  return text
-}
-
-export const useLang = (): [Lang, (l: Lang) => void] => {
-  const [lang, setLang] = useState<Lang>(() => {
-    const saved = localStorage.getItem('lang') as Lang
-    return saved || (navigator.language.startsWith('kk') ? 'kk' : 'ru')
-  })
-
-  const changeLang = (l: Lang) => {
-    setLang(l)
-    localStorage.setItem('lang', l)
-  }
-
-  return [lang, changeLang]
-}
+  return context;
+};

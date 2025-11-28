@@ -7,7 +7,7 @@ import { Search as SearchIcon, Calculate as CalculateIcon, Inventory as Inventor
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import Header from '../components/Header'
-import { useLang, t } from '../i18n'
+import { useTranslation } from '../i18n'
 
 const ENSTRU_MOCK = [
   { code: '03111000-7', name: 'Пшеница мягкая', nameKk: 'Жұмсақ бидай', specs: 'Класс 3, влажность ≤14%', specsKk: '3-класс, ылғалдылық ≤14%', unit: 'т' },
@@ -47,7 +47,7 @@ export default function ApplicationForm() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const isEdit = !!id
-  const [lang] = useLang()
+  const { t, lang } = useTranslation()
 
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)

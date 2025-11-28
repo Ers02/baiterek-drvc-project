@@ -7,7 +7,6 @@ from src.database.base import Base   # ← ВОТ ТАК!
 
 # Создаём таблицы
 Base.metadata.create_all(bind=engine)
-
 app = FastAPI(
     title="Байтерек — Портал заявок",
     description="Система подачи заявок с согласованием в банке",
