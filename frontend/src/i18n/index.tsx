@@ -33,6 +33,7 @@ const translations = {
     total_amount: 'Общая сумма',
     creation_date: 'Дата создания',
     active: 'Активный',
+    search:'Поиск',
 
     // SmetaForm (ранее PlanForm)
     smeta_form_title: 'Смета закупок на {year} год',
@@ -69,6 +70,8 @@ const translations = {
     status_DRAFT: 'Черновик',
     status_PRE_APPROVED: 'Предварительно утвержденный',
     status_APPROVED: 'Утвержденный',
+    all_plans: 'Все сметы',
+    status_EXECUTED: 'Исполненные',
     // Errors
     error_title: 'Ошибка',
   },
@@ -101,6 +104,7 @@ const translations = {
     total_amount: 'Жалпы сомасы',
     creation_date: 'Құрылған уақыт',
     active: 'Белсенді',
+    search:'Іздеу',
 
     // SmetaForm
     smeta_form_title: '{year} жылға арналған сатып алу сметасы',
@@ -137,6 +141,8 @@ const translations = {
     status_DRAFT: 'Жобалдық',
     status_PRE_APPROVED: 'Алдын ала бекітілген',
     status_APPROVED: 'Бекітілген',
+    all_plans: 'Барлық сметалар',
+    status_EXECUTED: 'Орындалды',
     // Errors
     error_title: 'Қате',
   },

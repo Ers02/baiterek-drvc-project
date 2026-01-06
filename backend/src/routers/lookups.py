@@ -70,7 +70,7 @@ def get_enstru_list(q: Optional[str] = None, db: Session = Depends(get_db)):
             or_(
                 models.Enstru.code.ilike(search_term),
                 models.Enstru.name_ru.ilike(search_term),
-                models.Enstru.name_kz.ilike(search_term)
+                models.Enstru.name_kz.ilike(search_term),
             )
         )
     return query.limit(50).all()

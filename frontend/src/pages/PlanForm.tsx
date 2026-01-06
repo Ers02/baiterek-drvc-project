@@ -1,26 +1,29 @@
-import { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Button, Typography, Paper, CircularProgress, Alert,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton,
   Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle,
-  Chip, Stack, Container
+  Chip, Stack, Container, Tooltip
 } from '@mui/material';
 import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
-  LockOpen as LockOpenIcon, CheckCircle as CheckCircleIcon, Download as DownloadIcon
+  LockOpen as LockOpenIcon, CheckCircle as CheckCircleIcon, Download as DownloadIcon,
+  Undo as UndoIcon, Assignment as AssignmentIcon, FileCopy as FileCopyIcon,
+  RadioButtonUnchecked as RadioButtonUncheckedIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n/index.tsx';
 import Header from '../components/Header';
+import ExecutionModal from '../components/ExecutionModal';
 import {
-  getPlanById, deleteItem, updateVersionStatus, exportVersionToExcel,
+  getPlanById, deleteItem, updateVersionStatus, exportVersionToExcel, revertItem, createVersion,
   PlanStatus
 } from '../services/api';
 import type { ProcurementPlan, ProcurementPlanVersion, PlanItemVersion } from '../services/api';
 
-// Helper to format currency
-const formatCurrency = (amount: number) =>
-  new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT' }).format(amount);
+// ОПТИМИЗАЦИЯ: Создаем форматтер один раз вне компонента
+const currencyFormatter = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT' });
+const formatCurrency = (amount: number) => currencyFormatter.format(amount);
 
 // Card for displaying statistics
 const StatsCard = ({ title, value, color = 'text.primary' }: { title: string; value: React.ReactNode; color?: string; }) => (
@@ -52,16 +55,138 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
 };
 
 // Chip for displaying status
-const StatusChip = ({ status }: { status: PlanStatus }) => {
+const StatusChip = ({ status, isExecuted }: { status: PlanStatus, isExecuted: boolean }) => {
   const { t } = useTranslation();
+  
+  if (isExecuted) {
+      return <Chip label={t('status_EXECUTED')} color="success" variant="outlined" sx={{ fontWeight: 'bold' }} icon={<CheckCircleIcon />} />;
+  }
+
   const statusMap = {
     [PlanStatus.DRAFT]: { label: t('status_DRAFT'), color: 'info' },
     [PlanStatus.PRE_APPROVED]: { label: t('status_PRE_APPROVED'), color: 'warning' },
-    [PlanStatus.APPROVED]: { label: t('status_APPROVED'), color: 'success' },
+    [PlanStatus.APPROVED]: { label: t('status_APPROVED'), color: 'primary' },
   };
   const { label, color } = statusMap[status] || statusMap.DRAFT;
   return <Chip label={label} color={color as any} variant="outlined" sx={{ fontWeight: 'bold' }} />;
 };
+
+// ОПТИМИЗАЦИЯ: Выносим строку таблицы в отдельный мемоизированный компонент
+const PlanItemRow = React.memo(({ 
+    item, 
+    activeVersionId, 
+    isEditable, 
+    isApproved, 
+    t, 
+    onEdit, 
+    onDelete, 
+    onRevert, 
+    onExecution 
+}: {
+    item: PlanItemVersion;
+    activeVersionId: number;
+    isEditable: boolean;
+    isApproved: boolean;
+    t: (key: string) => string;
+    onEdit: (id: number) => void;
+    onDelete: (id: number) => void;
+    onRevert: (id: number) => void;
+    onExecution: (item: PlanItemVersion) => void;
+}) => {
+    const canRevert = isEditable && !item.is_deleted && item.source_version_id === activeVersionId && item.root_item_id !== item.id;
+    
+    const executedQty = Number(item.executed_quantity || 0);
+    const planQty = Number(item.quantity || 0);
+    const executedAmt = Number(item.executed_amount || 0);
+    const planAmt = Number(item.total_amount || 0);
+    
+    const progress = planQty > 0 ? Math.min((executedQty / planQty) * 100, 100) : 0;
+    const isFullyExecuted = executedQty >= planQty && planQty > 0;
+
+    return (
+        <TableRow 
+            hover
+            sx={{
+            backgroundColor: item.is_deleted ? '#f5f5f5' : 'inherit',
+            '& .MuiTableCell-root': {
+                color: item.is_deleted ? 'text.disabled' : 'inherit',
+                textDecoration: item.is_deleted ? 'line-through' : 'none',
+            },
+            }}
+        >
+            <TableCell>{item.item_number}</TableCell>
+            <TableCell>{item.enstru?.name_ru || t('no_name')}</TableCell>
+            <TableCell>
+            <Chip label={item.is_ktp ? t('yes') : t('no')} color={item.is_ktp ? "success" : "default"} size="small" disabled={item.is_deleted} />
+            </TableCell>
+            <TableCell align="right">{item.quantity}</TableCell>
+            <TableCell align="right">{formatCurrency(item.price_per_unit)}</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 'bold' }}>{formatCurrency(item.total_amount)}</TableCell>
+            
+            {isApproved && (
+                <TableCell align="center">
+                {!item.is_deleted ? (
+                    <Tooltip 
+                        title={
+                            <Box>
+                                <Typography variant="caption" display="block">{t('quantity')}: {executedQty} / {planQty}</Typography>
+                                <Typography variant="caption" display="block">{t('sum')}: {formatCurrency(executedAmt)} / {formatCurrency(planAmt)}</Typography>
+                            </Box>
+                        }
+                    >
+                        <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                            {isFullyExecuted ? (
+                                <CheckCircleIcon color="success" />
+                            ) : executedQty > 0 ? (
+                                <CircularProgress variant="determinate" value={progress} size={24} />
+                            ) : (
+                                <RadioButtonUncheckedIcon color="disabled" />
+                            )}
+                        </Box>
+                    </Tooltip>
+                ) : (
+                    "-"
+                )}
+                </TableCell>
+            )}
+
+            <TableCell align="center">
+            {!item.is_deleted && (
+                <Stack direction="row" justifyContent="center" spacing={1}>
+                {isEditable && (
+                    <>
+                    <Tooltip title={t('edit_item')}>
+                        <IconButton size="small" onClick={() => onEdit(item.id)} color="primary">
+                        <EditIcon fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
+                    {canRevert && (
+                        <Tooltip title={t('revert_item')}>
+                        <IconButton size="small" onClick={() => onRevert(item.id)} color="warning">
+                            <UndoIcon fontSize="small" />
+                        </IconButton>
+                        </Tooltip>
+                    )}
+                    <Tooltip title={t('delete_item')}>
+                        <IconButton size="small" onClick={() => onDelete(item.id)} color="error">
+                        <DeleteIcon fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
+                    </>
+                )}
+                {isApproved && (
+                    <Tooltip title={t('execution_report')}>
+                    <IconButton size="small" onClick={() => onExecution(item)} color="info">
+                        <AssignmentIcon fontSize="small" />
+                    </IconButton>
+                    </Tooltip>
+                )}
+                </Stack>
+            )}
+            </TableCell>
+        </TableRow>
+    );
+});
 
 export default function PlanForm() {
   const { planId } = useParams<{ planId: string }>();
@@ -74,8 +199,16 @@ export default function PlanForm() {
   const [error, setError] = useState('');
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [nextStatus, setNextStatus] = useState<PlanStatus | null>(null);
+  
+  // State for Execution Modal
+  const [isExecutionModalOpen, setExecutionModalOpen] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [selectedItemName, setSelectedItemName] = useState('');
+  const [selectedItemQuantity, setSelectedItemQuantity] = useState(0);
+  const [selectedItemAmount, setSelectedItemAmount] = useState(0);
+  const [selectedItemPrice, setSelectedItemPrice] = useState(0);
 
-  const loadPlan = async () => {
+  const loadPlan = useCallback(async () => {
     if (!planId) return;
     try {
       setLoading(true);
@@ -88,11 +221,11 @@ export default function PlanForm() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [planId, t]);
 
   useEffect(() => {
     loadPlan();
-  }, [planId, t]);
+  }, [loadPlan]);
 
   const handleStatusChange = async () => {
     if (!planId || !nextStatus) return;
@@ -116,7 +249,19 @@ export default function PlanForm() {
     }
   };
 
-  const handleDeleteItem = async (itemId: number) => {
+  const handleCreateNewVersion = async () => {
+    if (!planId) return;
+    if (window.confirm(t('confirm_create_version'))) {
+      try {
+        const newVersion = await createVersion(Number(planId));
+        await loadPlan();
+      } catch (err: any) {
+        setError(err.response?.data?.detail || t('error_creating_version'));
+      }
+    }
+  };
+
+  const handleDeleteItem = useCallback(async (itemId: number) => {
     if (window.confirm(t('confirm_delete_item'))) {
       try {
         await deleteItem(itemId);
@@ -125,16 +270,41 @@ export default function PlanForm() {
         setError(t('error_deleting_item'));
       }
     }
-  };
+  }, [t, loadPlan]);
+
+  const handleRevertItem = useCallback(async (itemId: number) => {
+    if (window.confirm(t('confirm_revert_item'))) {
+      try {
+        await revertItem(itemId);
+        loadPlan();
+      } catch (err: any) {
+        const message = err.response?.data?.detail || t('error_reverting_item');
+        setError(message);
+      }
+    }
+  }, [t, loadPlan]);
+
+  const handleEditItem = useCallback((itemId: number) => {
+      navigate(`/items/${itemId}/edit`);
+  }, [navigate]);
 
   const openConfirmDialog = (status: PlanStatus) => {
     setNextStatus(status);
     setConfirmOpen(true);
   };
 
-  const isEditable = activeVersion?.status === PlanStatus.DRAFT;
+  const openExecutionModal = useCallback((item: PlanItemVersion) => {
+    setSelectedItemId(item.id);
+    setSelectedItemName(item.enstru?.name_ru || '');
+    setSelectedItemQuantity(Number(item.quantity));
+    setSelectedItemAmount(Number(item.total_amount));
+    setSelectedItemPrice(Number(item.price_per_unit));
+    setExecutionModalOpen(true);
+  }, []);
 
-  // Сортируем позиции: сначала активные, потом удаленные
+  const isEditable = activeVersion?.status === PlanStatus.DRAFT;
+  const isApproved = activeVersion?.status === PlanStatus.APPROVED;
+
   const sortedItems = useMemo(() => {
     if (!activeVersion?.items) return [];
     return [...activeVersion.items].sort((a, b) => {
@@ -161,7 +331,7 @@ export default function PlanForm() {
               <Typography variant="body1" color="text.secondary">
                   {plan.year}
               </Typography>
-              <StatusChip status={activeVersion.status} />
+              <StatusChip status={activeVersion.status} isExecuted={activeVersion.is_executed} />
               <Typography variant="subtitle1" color="text.secondary">
                 (v{activeVersion.version_number})
               </Typography>
@@ -171,6 +341,18 @@ export default function PlanForm() {
             <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}>
               {t('export_to_excel')}
             </Button>
+            
+            {!isEditable && (
+                <Button 
+                    variant="outlined" 
+                    color="primary" 
+                    startIcon={<FileCopyIcon />} 
+                    onClick={handleCreateNewVersion}
+                >
+                    {t('create_new_version')}
+                </Button>
+            )}
+
             {activeVersion.status === PlanStatus.DRAFT && (
               <Button variant="contained" color="warning" startIcon={<LockOpenIcon />} onClick={() => openConfirmDialog(PlanStatus.PRE_APPROVED)}>
                 {t('pre_approve')}
@@ -189,7 +371,7 @@ export default function PlanForm() {
         <Box sx={{ mt: 5 }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2} px={2}>
             <Typography variant="h5" fontWeight="500">
-              {t('plan_items_title')} ({activeVersion.items?.length || 0})
+              {t('plan_items_title')} ({activeVersion.items?.filter(it => !it.is_deleted).length || 0})
             </Typography>
             {isEditable && (
               <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate(`/plans/${planId}/items/new`)}>
@@ -209,50 +391,29 @@ export default function PlanForm() {
                     <TableCell align="right">{t('item_quantity')}</TableCell>
                     <TableCell align="right">{t('item_price')}</TableCell>
                     <TableCell align="right">{t('total_amount')}</TableCell>
-                    {isEditable && <TableCell align="center">{t('actions')}</TableCell>}
+                    {isApproved && <TableCell align="center">{t('status')}</TableCell>}
+                    <TableCell align="center">{t('actions')}</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {sortedItems.length > 0 ? (
-                    sortedItems.map((item: PlanItemVersion) => (
-                      <TableRow 
-                        key={item.id} 
-                        hover
-                        sx={{
-                          backgroundColor: item.is_deleted ? '#f5f5f5' : 'inherit',
-                          '& .MuiTableCell-root': {
-                            color: item.is_deleted ? 'text.disabled' : 'inherit',
-                            textDecoration: item.is_deleted ? 'line-through' : 'none',
-                          },
-                        }}
-                      >
-                        <TableCell>{item.item_number}</TableCell>
-                        <TableCell>{item.enstru?.name_ru || t('no_name')}</TableCell>
-                        <TableCell>
-                          <Chip label={item.is_ktp ? t('yes') : t('no')} color={item.is_ktp ? "success" : "default"} size="small" disabled={item.is_deleted} />
-                        </TableCell>
-                        <TableCell align="right">{item.quantity}</TableCell>
-                        <TableCell align="right">{formatCurrency(item.price_per_unit)}</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>{formatCurrency(item.total_amount)}</TableCell>
-                        {isEditable && (
-                          <TableCell align="center">
-                            {!item.is_deleted && (
-                              <>
-                                <IconButton size="small" onClick={() => navigate(`/items/${item.id}/edit`)} color="primary">
-                                  <EditIcon fontSize="small" />
-                                </IconButton>
-                                <IconButton size="small" onClick={() => handleDeleteItem(item.id)} color="error">
-                                  <DeleteIcon fontSize="small" />
-                                </IconButton>
-                              </>
-                            )}
-                          </TableCell>
-                        )}
-                      </TableRow>
+                    sortedItems.map((item) => (
+                        <PlanItemRow 
+                            key={item.id}
+                            item={item}
+                            activeVersionId={activeVersion.id}
+                            isEditable={isEditable}
+                            isApproved={isApproved}
+                            t={t}
+                            onEdit={handleEditItem}
+                            onDelete={handleDeleteItem}
+                            onRevert={handleRevertItem}
+                            onExecution={openExecutionModal}
+                        />
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={isEditable ? 7 : 6} align="center" sx={{ py: 3 }}>
+                      <TableCell colSpan={isApproved ? 8 : 7} align="center" sx={{ py: 3 }}>
                         <Typography color="text.secondary">{t('no_items_in_plan')}</Typography>
                       </TableCell>
                     </TableRow>
@@ -272,6 +433,21 @@ export default function PlanForm() {
           <Button onClick={handleStatusChange} variant="contained" autoFocus>{t('confirm')}</Button>
         </DialogActions>
       </Dialog>
+      
+      {selectedItemId && (
+        <ExecutionModal 
+          open={isExecutionModalOpen}
+          onClose={() => {
+              setExecutionModalOpen(false);
+              loadPlan(); 
+          }}
+          itemId={selectedItemId}
+          itemName={selectedItemName}
+          planQuantity={selectedItemQuantity}
+          planAmount={selectedItemAmount}
+          planPricePerUnit={selectedItemPrice}
+        />
+      )}
     </>
   );
 }

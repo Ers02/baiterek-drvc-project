@@ -55,3 +55,14 @@ def delete_plan_item(
     """
     item_service.delete_item(db=db, item_id=item_id, user=current_user)
     return {"ok": True}
+
+@router.post("/{item_id}/revert", response_model=plan_schema.PlanItem)
+def revert_plan_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Откатить изменения позиции к состоянию из предыдущей версии плана.
+    """
+    return item_service.revert_item(db=db, item_id=item_id, user=current_user)

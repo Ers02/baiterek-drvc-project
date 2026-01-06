@@ -26,8 +26,17 @@ export interface PlanItemVersion {
   total_amount: number;
   is_ktp: boolean;
   is_resident: boolean;
+  is_deleted: boolean;
   created_at: string;
   version: ProcurementPlanVersion; // Для контекста
+  
+  // Новые поля для истории
+  root_item_id?: number;
+  source_version_id?: number;
+  
+  // Новые поля для статуса исполнения
+  executed_quantity: number;
+  executed_amount: number;
 
   enstru?: Enstru;
   unit?: Mkei;
@@ -47,6 +56,7 @@ export interface ProcurementPlanVersion {
   ktp_percentage: number;
   import_percentage: number;
   is_active: boolean;
+  is_executed: boolean;
   created_at: string;
   creator: UserLookup;
   items?: PlanItemVersion[];
@@ -54,7 +64,7 @@ export interface ProcurementPlanVersion {
 
 export interface ProcurementPlan {
   id: number;
-  plan_name: string; // Новое поле
+  plan_name: string;
   year: number;
   created_by: number;
   created_at: string;
@@ -73,4 +83,35 @@ export interface PlanItemPayload {
   price_per_unit: number;
   is_ktp: boolean;
   is_resident: boolean;
+}
+
+// --- Типы для Исполнения (Execution) ---
+export interface Execution {
+  id: number;
+  plan_item_id: number;
+  supplier_name: string;
+  supplier_bin: string;
+  residency_code: string;
+  origin_code: string;
+  contract_number: string;
+  contract_date: string;
+  contract_quantity: number;
+  contract_price_per_unit: number;
+  contract_sum: number;
+  supply_volume_physical: number;
+  supply_volume_value: number;
+}
+
+export interface ExecutionPayload {
+  plan_item_id: number;
+  supplier_name: string;
+  supplier_bin: string;
+  residency_code: string;
+  origin_code: string;
+  contract_number: string;
+  contract_date: string;
+  contract_quantity: number;
+  contract_price_per_unit: number;
+  supply_volume_physical: number;
+  supply_volume_value: number;
 }

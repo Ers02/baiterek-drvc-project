@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime, Date,
-    ForeignKey, Numeric, SmallInteger, UniqueConstraint, Enum, and_
+    ForeignKey, Numeric, SmallInteger, UniqueConstraint, Enum, and_, Float
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -37,7 +37,7 @@ class ProcurementPlan(Base):
     __tablename__ = "procurement_plans"
 
     id = Column(Integer, primary_key=True)
-    plan_name = Column(String(128), nullable=False) # Новое поле
+    plan_name = Column(String(500), nullable=False)
     year = Column(SmallInteger, nullable=False)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -64,6 +64,8 @@ class ProcurementPlanVersion(Base):
     import_percentage = Column(Numeric(5, 2))
 
     is_active = Column(Boolean, default=True)
+    
+    is_executed = Column(Boolean, default=False, nullable=False)
 
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -74,6 +76,7 @@ class ProcurementPlanVersion(Base):
         "PlanItemVersion",
         back_populates="version",
         cascade="all, delete-orphan",
+        foreign_keys="[PlanItemVersion.version_id]"
     )
 
     __table_args__ = (
@@ -112,9 +115,17 @@ class PlanItemVersion(Base):
     
     is_deleted = Column(Boolean, default=False, nullable=False)
     
+    root_item_id = Column(Integer, index=True, nullable=True)
+    source_version_id = Column(Integer, ForeignKey("procurement_plan_versions.id"), nullable=True)
+    
+    executed_quantity = Column(Numeric(12, 3), default=0, nullable=False)
+    executed_amount = Column(Numeric(18, 2), default=0, nullable=False) # Новое поле
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    version = relationship("ProcurementPlanVersion", back_populates="items")
+    version = relationship("ProcurementPlanVersion", back_populates="items", foreign_keys=[version_id])
+    source_version = relationship("ProcurementPlanVersion", foreign_keys=[source_version_id])
+    
     enstru = relationship("Enstru")
     unit = relationship("Mkei")
     expense_item = relationship("Cost_Item")
@@ -122,10 +133,37 @@ class PlanItemVersion(Base):
     agsk = relationship("Agsk")
     kato_purchase = relationship("Kato", foreign_keys=[kato_purchase_id])
     kato_delivery = relationship("Kato", foreign_keys=[kato_delivery_id])
+    
+    executions = relationship("PlanItemExecution", back_populates="plan_item", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("version_id", "item_number", name="uq_version_item"),
     )
+
+class PlanItemExecution(Base):
+    __tablename__ = "plan_item_executions"
+
+    id = Column(Integer, primary_key=True)
+    plan_item_id = Column(Integer, ForeignKey("plan_item_versions.id", ondelete="CASCADE"), nullable=False)
+    
+    supplier_name = Column(String(500), nullable=False)
+    supplier_bin = Column(String(12), nullable=False)
+    residency_code = Column(String(50), nullable=False)
+    origin_code = Column(String(50), nullable=False)
+    
+    contract_number = Column(String(100), nullable=False)
+    contract_date = Column(Date, nullable=False)
+    
+    contract_quantity = Column(Numeric(12, 3), nullable=False)
+    contract_price_per_unit = Column(Numeric(18, 2), nullable=False)
+    contract_sum = Column(Numeric(18, 2), nullable=False)
+    
+    supply_volume_physical = Column(Numeric(12, 3), nullable=False)
+    supply_volume_value = Column(Numeric(18, 2), nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    plan_item = relationship("PlanItemVersion", back_populates="executions")
 
 
 class Mkei(Base):
@@ -177,19 +215,28 @@ class Enstru(Base):
 
 class Reestr_KTP(Base):
     __tablename__ = "reestr_ktp"
-    id = Column(Integer, primary_key=True)
-    reg_number_application= Column(Integer)
-    bin_iin = Column(String(12),nullable=False)
-    full_name = Column(String(255), nullable=False)
-    type_activity_oked = Column(String(30), nullable = False)
-    kato_code = Column(String(30), nullable=False)
-    actual_address = Column(Text)
-    product_name_ru = Column(Text)
-    product_name_kz = Column(Text)
-    unit_per_year = Column(String(20),nullable=False)
-    tn_ved = Column(String(10),nullable=True)
-    kpved = Column(String(20),nullable=True)
-    ens_tru_code = Column(String(35), nullable=False)
-    agsk_code = Column(String(50), nullable=True)
-    level_localization = Column(Integer)
-    date_add_reestr = Column(Date)
+
+    id = Column(Integer, primary_key=True, index=True)
+    product_code = Column(String(50), nullable=True)          # Код товара (иногда содержит буквы)
+    registration_number = Column(String(50), nullable=True)   # Рег. номер (может быть длинным)
+    bin_iin = Column(String(12), nullable=False, index=True)  # БИН/ИИН всегда 12 символов
+    company_name = Column(String(500), nullable=False)        # Название компании
+    oked_codes = Column(String(50), nullable=True)            # Коды ОКЭД
+    oked_names = Column(Text, nullable=True)                  # Расшифровка ОКЭД
+    region_kato = Column(String(50), nullable=True)           # Код или название региона
+    production_address = Column(Text, nullable=True)          # Адрес производства
+    website = Column(String(255), nullable=True)              # Сайт
+    phone = Column(String(100), nullable=True)                # Телефон (строка, т.к. могут быть скобки/дефисы)
+    email = Column(String(255), nullable=True)                # Email
+    product_name = Column(Text, nullable=False)               # Наименование товара
+    production_capacity = Column(String(255), nullable=True)  # Мощность (может быть "100 тонн в год")
+    tnved_code_10 = Column(String(10), nullable=True)         # ТНВЭД (обычно 10 цифр)
+    kpved_code = Column(String(20), nullable=True)            # КПВЭД код
+    kpved_name = Column(Text, nullable=True)                  # КПВЭД название
+    enstru_code = Column(String(50), nullable=True)           # ЕНС ТРУ код
+    enstru_name = Column(Text, nullable=True)                 # ЕНС ТРУ название
+    agsk3_code = Column(String(50), nullable=True)            # АГСК код
+    agsk3_name = Column(Text, nullable=True)                  # АГСК название
+    dvc_percent = Column(Float, nullable=True)                # Доля внутристрановой ценности (%)
+    localization_level = Column(Integer, nullable=True)       # Уровень локализации (число)
+    registry_inclusion_date = Column(Date, nullable=True)     # Дата включения в реестр

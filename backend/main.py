@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.routers import auth, plans, items, lookups, kato_router
+from src.routers import auth, plans, items, lookups, kato_router, execution_router
 from src.database.database import engine
 from src.database.base import Base
 
@@ -29,6 +29,7 @@ api_router.include_router(plans.router)
 api_router.include_router(items.router)
 api_router.include_router(lookups.router)
 api_router.include_router(kato_router.router, prefix="/kato", tags=["kato"])
+api_router.include_router(execution_router.router) # Добавляем новый роутер
 
 app.mount("/api", api_router)
 

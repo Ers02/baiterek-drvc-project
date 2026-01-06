@@ -13,6 +13,7 @@ class ProcurementPlanVersionBase(BaseModel):
     ktp_percentage: Optional[Decimal] = Field(default=0)
     import_percentage: Optional[Decimal] = Field(default=0)
     is_active: bool
+    is_executed: bool = False
 
 class ProcurementPlanVersion(ProcurementPlanVersionBase):
     id: int
@@ -63,8 +64,14 @@ class PlanItem(BaseModel):
     total_amount: Decimal
     is_ktp: bool
     is_resident: bool
-    is_deleted: bool # Добавлено поле
+    is_deleted: bool
     created_at: datetime
+    
+    root_item_id: Optional[int] = None
+    source_version_id: Optional[int] = None
+    
+    executed_quantity: Decimal = Field(default=0)
+    executed_amount: Decimal = Field(default=0) # Новое поле
 
     enstru: Optional[lookup_schema.Enstru] = None
     unit: Optional[lookup_schema.Mkei] = None
@@ -85,7 +92,7 @@ class ProcurementPlanVersionWithItems(ProcurementPlanVersion):
 # ========= Схемы для Плана Закупок (ProcurementPlan) =========
 
 class ProcurementPlanBase(BaseModel):
-    plan_name: str = Field(..., min_length=3, max_length=128)
+    plan_name: str = Field(..., min_length=3, max_length=500)
     year: int
 
 class ProcurementPlanCreate(ProcurementPlanBase):

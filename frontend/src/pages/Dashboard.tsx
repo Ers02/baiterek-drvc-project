@@ -1,15 +1,15 @@
-import { useEffect, useState, Fragment } from 'react';
+import React, { useEffect, useState, Fragment, useMemo } from 'react';
 import {
   Box, Button, Typography, Paper, CircularProgress, Alert,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, DialogContentText,
-  Collapse, Chip, Tooltip, Stack
+  Collapse, Chip, Tooltip, Stack, Tabs, Tab, InputAdornment
 } from '@mui/material';
 import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon, KeyboardArrowUp as KeyboardArrowUpIcon,
   FileCopy as FileCopyIcon, Download as DownloadIcon, RestoreFromTrash as RestoreFromTrashIcon,
-  Visibility as VisibilityIcon
+  Visibility as VisibilityIcon, CheckCircle as CheckCircleIcon, Search as SearchIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n/index.tsx';
@@ -26,17 +26,18 @@ const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT' }).format(amount);
 
 // Helper to get status chip color
-const getStatusChipColor = (status: PlanStatus) => {
+const getStatusChipColor = (status: PlanStatus, isExecuted: boolean) => {
+  if (isExecuted) return "success";
   switch (status) {
     case PlanStatus.DRAFT: return "info";
     case PlanStatus.PRE_APPROVED: return "warning";
-    case PlanStatus.APPROVED: return "success";
+    case PlanStatus.APPROVED: return "primary";
     default: return "default";
   }
 };
 
 // Row component for the main plan table
-function PlanRow({ plan, onReload }: { plan: ProcurementPlan; onReload: () => void; }) {
+const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReload: () => void; }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -84,6 +85,7 @@ function PlanRow({ plan, onReload }: { plan: ProcurementPlan; onReload: () => vo
 
   const activeVersion = plan.versions.find(v => v.is_active);
   const canDeletePlan = !plan.versions.some(v => v.status !== PlanStatus.DRAFT);
+  const isExecuted = activeVersion?.is_executed || false;
 
   return (
     <Fragment>
@@ -94,16 +96,28 @@ function PlanRow({ plan, onReload }: { plan: ProcurementPlan; onReload: () => vo
           </IconButton>
         </TableCell>
         <TableCell>
-          <Typography variant="subtitle1" fontWeight="bold">{plan.plan_name}</Typography>
+          <Typography
+            variant="subtitle1"
+            fontWeight="bold"
+            sx={{
+                cursor: 'pointer',
+                color: 'primary.main',
+                '&:hover': { textDecoration: 'underline' }
+            }}
+            onClick={() => navigate(`/plans/${plan.id}`)}
+          >
+            {plan.plan_name}
+          </Typography>
           <Typography variant="body2" color="text.secondary">
             {plan.year}
           </Typography>
         </TableCell>
         <TableCell>
           <Chip
-            label={t(`status_${activeVersion?.status}`)}
-            color={getStatusChipColor(activeVersion?.status || PlanStatus.DRAFT)}
+            label={isExecuted ? t('status_EXECUTED') : t(`status_${activeVersion?.status}`)}
+            color={getStatusChipColor(activeVersion?.status || PlanStatus.DRAFT, isExecuted)}
             size="small"
+            icon={isExecuted ? <CheckCircleIcon /> : undefined}
           />
         </TableCell>
         <TableCell>{formatCurrency(activeVersion?.total_amount || 0)}</TableCell>
@@ -171,7 +185,11 @@ function PlanRow({ plan, onReload }: { plan: ProcurementPlan; onReload: () => vo
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Chip label={t(`status_${version.status}`)} color={getStatusChipColor(version.status)} size="small" />
+                        <Chip 
+                            label={version.is_executed ? t('status_EXECUTED') : t(`status_${version.status}`)} 
+                            color={getStatusChipColor(version.status, version.is_executed)} 
+                            size="small" 
+                        />
                       </TableCell>
                       <TableCell>{formatCurrency(version.total_amount)}</TableCell>
                       <TableCell>{version.creator?.full_name || '-'}</TableCell>
@@ -198,7 +216,7 @@ function PlanRow({ plan, onReload }: { plan: ProcurementPlan; onReload: () => vo
       </Dialog>
     </Fragment>
   );
-}
+});
 
 // Main Dashboard component
 export default function Dashboard() {
@@ -210,6 +228,10 @@ export default function Dashboard() {
   const [isCreateDialogOpen, setCreateDialogOpen] = useState(false);
   const [newPlanName, setNewPlanName] = useState('');
   const [newPlanYear, setNewPlanYear] = useState(new Date().getFullYear());
+  
+  // State for Tabs and Search
+  const [currentTab, setCurrentTab] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const loadPlans = async () => {
     try {
@@ -249,6 +271,43 @@ export default function Dashboard() {
     }
   };
 
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setCurrentTab(newValue);
+  };
+
+  // Filter plans based on search query and current tab
+  const filteredPlans = useMemo(() => {
+    let filtered = plans;
+
+    // 1. Filter by search query
+    if (searchQuery) {
+        const lowerQuery = searchQuery.toLowerCase();
+        filtered = filtered.filter(plan => 
+            plan.plan_name.toLowerCase().includes(lowerQuery) || 
+            plan.year.toString().includes(lowerQuery)
+        );
+    }
+
+    // 2. Filter by tab
+    // Tabs: 0=All, 1=Draft, 2=PreApproved, 3=Approved, 4=Executed
+    if (currentTab === 0) return filtered;
+
+    return filtered.filter(plan => {
+        const activeVersion = plan.versions.find(v => v.is_active);
+        if (!activeVersion) return false;
+
+        if (currentTab === 4) return activeVersion.is_executed;
+        if (activeVersion.is_executed) return false; // Executed plans shouldn't appear in other tabs
+
+        switch (currentTab) {
+            case 1: return activeVersion.status === PlanStatus.DRAFT;
+            case 2: return activeVersion.status === PlanStatus.PRE_APPROVED;
+            case 3: return activeVersion.status === PlanStatus.APPROVED;
+            default: return true;
+        }
+    });
+  }, [plans, searchQuery, currentTab]);
+
   return (
     <>
       <Header />
@@ -259,6 +318,40 @@ export default function Dashboard() {
             {t('create_plan')}
           </Button>
         </Box>
+
+        {/* Search Bar */}
+        <TextField
+            fullWidth
+            variant="outlined"
+            placeholder={t('search_plans_placeholder')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            sx={{ mb: 3, bgcolor: 'background.paper' }}
+            InputProps={{
+                startAdornment: (
+                    <InputAdornment position="start">
+                        <SearchIcon color="action" />
+                    </InputAdornment>
+                ),
+            }}
+        />
+
+        {/* Tabs */}
+        <Paper sx={{ mb: 3 }}>
+            <Tabs 
+                value={currentTab} 
+                onChange={handleTabChange} 
+                indicatorColor="primary" 
+                textColor="primary"
+                variant="fullWidth"
+            >
+                <Tab label={t('all_plans')} />
+                <Tab label={t('status_DRAFT')} />
+                <Tab label={t('status_PRE_APPROVED')} />
+                <Tab label={t('status_APPROVED')} />
+                <Tab label={t('status_EXECUTED')} />
+            </Tabs>
+        </Paper>
 
         {loading && <CircularProgress />}
         {error && !loading && <Alert severity="error">{error}</Alert>}
@@ -276,14 +369,14 @@ export default function Dashboard() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {plans.length === 0 ? (
+                {filteredPlans.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} align="center">
                       <Typography color="text.secondary" sx={{ p: 3 }}>{t('no_plans_found')}</Typography>
                     </TableCell>
                   </TableRow>
                 ) : (
-                  plans.map(plan => <PlanRow key={plan.id} plan={plan} onReload={loadPlans} />)
+                  filteredPlans.map(plan => <PlanRow key={plan.id} plan={plan} onReload={loadPlans} />)
                 )}
               </TableBody>
             </Table>

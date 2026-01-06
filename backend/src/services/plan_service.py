@@ -25,6 +25,7 @@ def _recalculate_version_metrics(db: Session, version_id: int):
     if not version:
         return
 
+    # Считаем только не удаленные позиции
     total_amount_res = db.query(func.sum(models.PlanItemVersion.total_amount)).filter(
         models.PlanItemVersion.version_id == version_id,
         models.PlanItemVersion.is_deleted == False
@@ -85,7 +86,8 @@ def get_plan_with_active_version(db: Session, plan_id: int) -> models.Procuremen
             joinedload(models.PlanItemVersion.funding_source),
             joinedload(models.PlanItemVersion.agsk),
             joinedload(models.PlanItemVersion.kato_purchase),
-            joinedload(models.PlanItemVersion.kato_delivery)
+            joinedload(models.PlanItemVersion.kato_delivery),
+            joinedload(models.PlanItemVersion.source_version) # Загружаем информацию о версии-источнике
         )
     ).filter(
         models.ProcurementPlan.id == plan_id
@@ -161,9 +163,17 @@ def create_new_version_for_editing(db: Session, plan_id: int, user: models.User)
                 new_item_data = {
                     key: getattr(item, key)
                     for key in item.__table__.columns.keys()
-                    if key not in ['id', 'version_id']
+                    if key not in ['id', 'version_id', 'created_at']
                 }
                 new_item_data['version_id'] = new_version.id
+                
+                # ЛОГИКА НАСЛЕДОВАНИЯ:
+                # Если у позиции уже есть root_item_id, используем его. Если нет - значит это первая версия, и она сама становится корнем.
+                # Если у позиции уже есть source_version_id, используем его. Если нет - значит она была создана в предыдущей версии.
+                
+                new_item_data['root_item_id'] = item.root_item_id if item.root_item_id else item.id
+                new_item_data['source_version_id'] = item.source_version_id if item.source_version_id else current_active_version.id
+                
                 new_items.append(models.PlanItemVersion(**new_item_data))
 
         if new_items:
@@ -257,9 +267,13 @@ def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCre
         version_id=active_version.id,
         item_number=item_number,
         total_amount=total_amount,
-        need_type=models.NeedType(enstru_item.type_ru)
+        need_type=models.NeedType(enstru_item.type_ru),
+        # При создании новой позиции она сама себе корень и источник
+        source_version_id=active_version.id
     )
     db.add(db_item)
+    db.flush() # Чтобы получить ID
+    db_item.root_item_id = db_item.id
     db.commit()
 
     _recalculate_version_metrics(db, active_version.id)

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, desc
 from decimal import Decimal
 from fastapi import HTTPException, status
 from ..models import models
@@ -43,6 +43,9 @@ def update_item(db: Session, item_id: int, item_in: plan_schema.PlanItemUpdate, 
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Код ЕНС ТРУ '{update_data['trucode']}' не найден.")
 
+    # Обновляем source_version_id, так как позиция была изменена в этой версии
+    db_item.source_version_id = version.id
+
     db.commit()
     _recalculate_version_metrics(db, version.id)
     db.refresh(db_item)
@@ -71,3 +74,57 @@ def delete_item(db: Session, item_id: int, user: models.User) -> bool:
     _recalculate_version_metrics(db, version.id)
     
     return True
+
+def revert_item(db: Session, item_id: int, user: models.User) -> models.PlanItemVersion:
+    """
+    Откатывает позицию к состоянию из предыдущей версии плана.
+    """
+    db_item = get_item(db, item_id)
+    if not db_item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Позиция не найдена")
+
+    version = db_item.version
+    if version.status != models.PlanStatus.DRAFT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Откат возможен только для черновика.")
+    
+    if version.plan.created_by != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав для изменения этой позиции.")
+
+    # Если позиция не менялась в этой версии, откатывать нечего
+    if db_item.source_version_id != version.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Эта позиция не была изменена в текущей версии.")
+
+    # Ищем предыдущую версию этой позиции
+    # Мы ищем запись с тем же root_item_id, но в версии с меньшим номером
+    # Явно указываем условие JOIN, чтобы избежать AmbiguousForeignKeysError
+    previous_item = db.query(models.PlanItemVersion).join(
+        models.ProcurementPlanVersion,
+        models.PlanItemVersion.version_id == models.ProcurementPlanVersion.id
+    ).filter(
+        models.PlanItemVersion.root_item_id == db_item.root_item_id,
+        models.ProcurementPlanVersion.plan_id == version.plan_id,
+        models.ProcurementPlanVersion.version_number < version.version_number,
+        models.PlanItemVersion.is_deleted == False
+    ).order_by(desc(models.ProcurementPlanVersion.version_number)).first()
+
+    if not previous_item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Предыдущая версия этой позиции не найдена.")
+
+    # Копируем данные из предыдущей версии
+    fields_to_copy = [
+        'trucode', 'unit_id', 'expense_item_id', 'funding_source_id',
+        'agsk_id', 'kato_purchase_id', 'kato_delivery_id',
+        'quantity', 'price_per_unit', 'total_amount',
+        'is_ktp', 'is_resident', 'need_type'
+    ]
+    
+    for field in fields_to_copy:
+        setattr(db_item, field, getattr(previous_item, field))
+
+    # Восстанавливаем ссылку на исходную версию
+    db_item.source_version_id = previous_item.source_version_id
+
+    db.commit()
+    _recalculate_version_metrics(db, version.id)
+    db.refresh(db_item)
+    return db_item

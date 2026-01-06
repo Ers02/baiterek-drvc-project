@@ -1,7 +1,8 @@
 import axios from 'axios';
 import type { 
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
-    NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload 
+    NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
+    Execution, ExecutionPayload
 } from './api.types';
 import { PlanStatus } from './api.types';
 
@@ -77,10 +78,17 @@ export const getItemById = (itemId: number): Promise<PlanItemVersion> => api.get
 export const addItemToPlan = (planId: number, itemData: PlanItemPayload): Promise<PlanItemVersion> => api.post(`/plans/${planId}/items`, itemData).then(res => res.data);
 export const updateItem = (itemId: number, itemData: Partial<PlanItemPayload>): Promise<PlanItemVersion> => api.put(`/items/${itemId}`, itemData).then(res => res.data);
 export const deleteItem = (itemId: number): Promise<void> => api.delete(`/items/${itemId}`);
+export const revertItem = (itemId: number): Promise<PlanItemVersion> => api.post(`/items/${itemId}/revert`).then(res => res.data);
+
+// --- API для Исполнения (Execution) ---
+export const createExecution = (data: ExecutionPayload): Promise<Execution> => api.post('/executions/', data).then(res => res.data);
+export const getExecutionsByItem = (itemId: number): Promise<Execution[]> => api.get(`/executions/by-item/${itemId}`).then(res => res.data);
+export const deleteExecution = (executionId: number): Promise<void> => api.delete(`/executions/${executionId}`);
 
 export default api;
 export { PlanStatus };
 export type { 
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
-    NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload 
+    NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
+    Execution, ExecutionPayload
 };
