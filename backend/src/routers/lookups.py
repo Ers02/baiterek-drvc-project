@@ -15,7 +15,7 @@ router = APIRouter(
 @router.get("/check-ktp/{enstru_code}")
 def check_ktp_by_enstru(enstru_code: str, db: Session = Depends(get_db)):
     """Проверяет, есть ли код ЕНС ТРУ в реестре КТП."""
-    exists = db.query(models.Reestr_KTP).filter(models.Reestr_KTP.ens_tru_code == enstru_code).first()
+    exists = db.query(models.Reestr_KTP).filter(models.Reestr_KTP.enstru_code == enstru_code).first()
     return {"is_ktp": exists is not None}
 
 @router.get("/mkei", response_model=List[lookup_schema.Mkei])

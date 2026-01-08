@@ -43,8 +43,12 @@ def update_item(db: Session, item_id: int, item_in: plan_schema.PlanItemUpdate, 
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Код ЕНС ТРУ '{update_data['trucode']}' не найден.")
 
-    # Обновляем source_version_id, так как позиция была изменена в этой версии
-    db_item.source_version_id = version.id
+    # ЛОГИКА РЕДАКЦИЙ:
+    # Если source_version_id отличается от текущей версии, значит это первое изменение в этой версии.
+    # Мы должны увеличить счетчик редакций.
+    if db_item.source_version_id != version.id:
+        db_item.revision_number += 1
+        db_item.source_version_id = version.id
 
     db.commit()
     _recalculate_version_metrics(db, version.id)
@@ -95,8 +99,6 @@ def revert_item(db: Session, item_id: int, user: models.User) -> models.PlanItem
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Эта позиция не была изменена в текущей версии.")
 
     # Ищем предыдущую версию этой позиции
-    # Мы ищем запись с тем же root_item_id, но в версии с меньшим номером
-    # Явно указываем условие JOIN, чтобы избежать AmbiguousForeignKeysError
     previous_item = db.query(models.PlanItemVersion).join(
         models.ProcurementPlanVersion,
         models.PlanItemVersion.version_id == models.ProcurementPlanVersion.id
@@ -115,7 +117,8 @@ def revert_item(db: Session, item_id: int, user: models.User) -> models.PlanItem
         'trucode', 'unit_id', 'expense_item_id', 'funding_source_id',
         'agsk_id', 'kato_purchase_id', 'kato_delivery_id',
         'quantity', 'price_per_unit', 'total_amount',
-        'is_ktp', 'is_resident', 'need_type'
+        'is_ktp', 'is_resident', 'need_type',
+        'revision_number' # Восстанавливаем номер редакции
     ]
     
     for field in fields_to_copy:

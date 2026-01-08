@@ -365,7 +365,7 @@ export default function Dashboard() {
                   <TableCell>{t('plan_details')}</TableCell>
                   <TableCell>{t('current_status')}</TableCell>
                   <TableCell>{t('active_version_amount')}</TableCell>
-                  <TableCell align="right">{t('main_actions')}</TableCell>
+                  <TableCell align="right">{t('actions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>

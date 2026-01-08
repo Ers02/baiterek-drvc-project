@@ -12,6 +12,12 @@ class ProcurementPlanVersionBase(BaseModel):
     total_amount: Decimal = Field(default=0)
     ktp_percentage: Optional[Decimal] = Field(default=0)
     import_percentage: Optional[Decimal] = Field(default=0)
+    
+    # Новые поля для ВЦ
+    vc_mean: Optional[Decimal] = Field(default=0)
+    vc_median: Optional[Decimal] = Field(default=0)
+    vc_amount: Optional[Decimal] = Field(default=0)
+    
     is_active: bool
     is_executed: bool = False
 
@@ -70,8 +76,15 @@ class PlanItem(BaseModel):
     root_item_id: Optional[int] = None
     source_version_id: Optional[int] = None
     
+    # Новое поле
+    revision_number: int = 0
+    
     executed_quantity: Decimal = Field(default=0)
-    executed_amount: Decimal = Field(default=0) # Новое поле
+    executed_amount: Decimal = Field(default=0)
+    
+    min_dvc_percent: Decimal = Field(default=0)
+    
+    start_version_number: int
 
     enstru: Optional[lookup_schema.Enstru] = None
     unit: Optional[lookup_schema.Mkei] = None
@@ -82,6 +95,7 @@ class PlanItem(BaseModel):
     kato_delivery: Optional[lookup_schema.Kato] = None
     
     version: ProcurementPlanVersion
+    source_version: Optional[ProcurementPlanVersion] = None
 
     class Config:
         from_attributes = True

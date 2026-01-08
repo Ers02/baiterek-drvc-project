@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 import io
 import openpyxl
+import statistics
 from ..models import models
 from ..schemas import plan as plan_schema
 
@@ -25,20 +26,47 @@ def _recalculate_version_metrics(db: Session, version_id: int):
     if not version:
         return
 
-    # Считаем только не удаленные позиции
-    total_amount_res = db.query(func.sum(models.PlanItemVersion.total_amount)).filter(
+    # Получаем все не удаленные позиции
+    items = db.query(models.PlanItemVersion).filter(
         models.PlanItemVersion.version_id == version_id,
         models.PlanItemVersion.is_deleted == False
-    ).first()
-    ktp_amount_res = db.query(func.sum(models.PlanItemVersion.total_amount)).filter(
-        models.PlanItemVersion.version_id == version_id,
-        models.PlanItemVersion.is_ktp == True,
-        models.PlanItemVersion.is_deleted == False
-    ).first()
+    ).all()
 
-    total_amount = total_amount_res[0] if total_amount_res[0] is not None else Decimal('0.00')
-    ktp_amount = ktp_amount_res[0] if ktp_amount_res[0] is not None else Decimal('0.00')
+    total_amount = Decimal('0.00')
+    ktp_amount = Decimal('0.00')
+    
+    vc_values = [] # Список значений ВЦ для расчета медианы и среднего
+    vc_amount_total = Decimal('0.00')
 
+    for item in items:
+        total_amount += item.total_amount
+        if item.is_ktp:
+            ktp_amount += item.total_amount
+        
+        # Поиск минимального dvc_percent в реестре КТП
+        # Ищем по коду ЕНС ТРУ (trucode)
+        # Если записей несколько, берем минимальный процент
+        min_dvc = db.query(func.min(models.Reestr_KTP.dvc_percent)).filter(
+            models.Reestr_KTP.enstru_code == item.trucode
+        ).scalar()
+        
+        # Если в реестре нет данных, считаем 0
+        # Используем str() для безопасного преобразования float в Decimal
+        item_dvc_percent = Decimal(str(min_dvc)) if min_dvc is not None else Decimal('0.00')
+        
+        # Сохраняем найденный процент в позицию
+        item.min_dvc_percent = item_dvc_percent
+        
+        # Для расчета общих показателей ВЦ:
+        # ВЦ позиции = Сумма позиции * (Процент ВЦ / 100)
+        item_vc_amount = item.total_amount * (item_dvc_percent / Decimal('100.00'))
+        vc_amount_total += item_vc_amount
+        
+        # Собираем проценты для статистики (только если сумма > 0, чтобы не искажать среднее пустыми строками)
+        if item.total_amount > 0:
+             vc_values.append(float(item_dvc_percent))
+
+    # Расчет процентов КТП/Импорт
     if total_amount > 0:
         ktp_percentage = (ktp_amount / total_amount * 100)
         import_percentage = Decimal('100.00') - ktp_percentage
@@ -46,9 +74,22 @@ def _recalculate_version_metrics(db: Session, version_id: int):
         ktp_percentage = Decimal('0.00')
         import_percentage = Decimal('0.00')
 
+    # Расчет статистики ВЦ
+    if vc_values:
+        vc_mean = Decimal(str(statistics.mean(vc_values)))
+        vc_median = Decimal(str(statistics.median(vc_values)))
+    else:
+        vc_mean = Decimal('0.00')
+        vc_median = Decimal('0.00')
+
     version.total_amount = total_amount
     version.ktp_percentage = ktp_percentage
     version.import_percentage = import_percentage
+    
+    version.vc_mean = vc_mean
+    version.vc_median = vc_median
+    version.vc_amount = vc_amount_total
+
     db.commit()
     db.refresh(version)
 
@@ -87,7 +128,8 @@ def get_plan_with_active_version(db: Session, plan_id: int) -> models.Procuremen
             joinedload(models.PlanItemVersion.agsk),
             joinedload(models.PlanItemVersion.kato_purchase),
             joinedload(models.PlanItemVersion.kato_delivery),
-            joinedload(models.PlanItemVersion.source_version) # Загружаем информацию о версии-источнике
+            joinedload(models.PlanItemVersion.source_version),
+            joinedload(models.PlanItemVersion.root_item).joinedload(models.PlanItemVersion.version)
         )
     ).filter(
         models.ProcurementPlan.id == plan_id
@@ -167,12 +209,10 @@ def create_new_version_for_editing(db: Session, plan_id: int, user: models.User)
                 }
                 new_item_data['version_id'] = new_version.id
                 
-                # ЛОГИКА НАСЛЕДОВАНИЯ:
-                # Если у позиции уже есть root_item_id, используем его. Если нет - значит это первая версия, и она сама становится корнем.
-                # Если у позиции уже есть source_version_id, используем его. Если нет - значит она была создана в предыдущей версии.
-                
                 new_item_data['root_item_id'] = item.root_item_id if item.root_item_id else item.id
                 new_item_data['source_version_id'] = item.source_version_id if item.source_version_id else current_active_version.id
+                
+                # revision_number копируется автоматически, так как он есть в new_item_data
                 
                 new_items.append(models.PlanItemVersion(**new_item_data))
 
@@ -255,9 +295,9 @@ def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCre
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Код ЕНС ТРУ не найден")
 
     last_item = db.query(models.PlanItemVersion).filter(
-        models.PlanItemVersion.version_id == active_version.id,
-        models.PlanItemVersion.is_deleted == False
+        models.PlanItemVersion.version_id == active_version.id
     ).order_by(desc(models.PlanItemVersion.item_number)).first()
+    
     item_number = (last_item.item_number + 1) if last_item else 1
 
     total_amount = item_in.quantity * item_in.price_per_unit
@@ -268,11 +308,11 @@ def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCre
         item_number=item_number,
         total_amount=total_amount,
         need_type=models.NeedType(enstru_item.type_ru),
-        # При создании новой позиции она сама себе корень и источник
-        source_version_id=active_version.id
+        source_version_id=active_version.id,
+        revision_number=0 # Новая позиция, редакция 0
     )
     db.add(db_item)
-    db.flush() # Чтобы получить ID
+    db.flush()
     db_item.root_item_id = db_item.id
     db.commit()
 

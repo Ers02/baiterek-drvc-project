@@ -33,10 +33,16 @@ export interface PlanItemVersion {
   // Новые поля для истории
   root_item_id?: number;
   source_version_id?: number;
+  source_version?: ProcurementPlanVersion;
+  start_version_number: number;
+  revision_number: number; // Номер редакции
   
   // Новые поля для статуса исполнения
   executed_quantity: number;
   executed_amount: number;
+  
+  // Новое поле для ВЦ
+  min_dvc_percent: number;
 
   enstru?: Enstru;
   unit?: Mkei;
@@ -55,6 +61,12 @@ export interface ProcurementPlanVersion {
   total_amount: number;
   ktp_percentage: number;
   import_percentage: number;
+  
+  // Новые поля для ВЦ
+  vc_mean: number;
+  vc_median: number;
+  vc_amount: number;
+  
   is_active: boolean;
   is_executed: boolean;
   created_at: string;

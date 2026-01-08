@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime, Date,
-    ForeignKey, Numeric, SmallInteger, UniqueConstraint, Enum, and_, Float
+    ForeignKey, Numeric, SmallInteger, UniqueConstraint, Enum, and_, Float, text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -62,9 +62,13 @@ class ProcurementPlanVersion(Base):
     total_amount = Column(Numeric(20, 2), default=0)
     ktp_percentage = Column(Numeric(5, 2))
     import_percentage = Column(Numeric(5, 2))
+    
+    # Новые поля для статистики ВЦ (Value Creation)
+    vc_mean = Column(Numeric(5, 2), default=0) # Среднее значение
+    vc_median = Column(Numeric(5, 2), default=0) # Медиана
+    vc_amount = Column(Numeric(20, 2), default=0) # Количественное (сумма)
 
     is_active = Column(Boolean, default=True)
-    
     is_executed = Column(Boolean, default=False, nullable=False)
 
     created_by = Column(Integer, ForeignKey("users.id"))
@@ -115,16 +119,23 @@ class PlanItemVersion(Base):
     
     is_deleted = Column(Boolean, default=False, nullable=False)
     
-    root_item_id = Column(Integer, index=True, nullable=True)
+    root_item_id = Column(Integer, ForeignKey("plan_item_versions.id"), index=True, nullable=True)
     source_version_id = Column(Integer, ForeignKey("procurement_plan_versions.id"), nullable=True)
     
+    # Новое поле: номер редакции (0 - оригинал, 1 - первая правка и т.д.)
+    revision_number = Column(Integer, default=0, nullable=False,server_default=text('0'))
+    
     executed_quantity = Column(Numeric(12, 3), default=0, nullable=False)
-    executed_amount = Column(Numeric(18, 2), default=0, nullable=False) # Новое поле
+    executed_amount = Column(Numeric(18, 2), default=0, nullable=False)
+    
+    min_dvc_percent = Column(Numeric(5, 2), default=0)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     version = relationship("ProcurementPlanVersion", back_populates="items", foreign_keys=[version_id])
     source_version = relationship("ProcurementPlanVersion", foreign_keys=[source_version_id])
+    
+    root_item = relationship("PlanItemVersion", remote_side=[id], foreign_keys=[root_item_id])
     
     enstru = relationship("Enstru")
     unit = relationship("Mkei")
@@ -139,6 +150,15 @@ class PlanItemVersion(Base):
     __table_args__ = (
         UniqueConstraint("version_id", "item_number", name="uq_version_item"),
     )
+    
+    @property
+    def start_version_number(self):
+        """Возвращает номер версии, в которой была создана эта позиция."""
+        if self.root_item and self.root_item.version:
+            return self.root_item.version.version_number
+        if self.version:
+             return self.version.version_number
+        return 1
 
 class PlanItemExecution(Base):
     __tablename__ = "plan_item_executions"

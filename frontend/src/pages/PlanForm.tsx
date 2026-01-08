@@ -44,12 +44,27 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
   const ktpPercentage = Number(version.ktp_percentage ?? 0);
   const importPercentage = Number(version.import_percentage ?? 0);
   const totalAmount = Number(version.total_amount ?? 0);
+  
+  // Новые показатели ВЦ
+  const vcMean = Number(version.vc_mean ?? 0);
+  const vcMedian = Number(version.vc_median ?? 0);
+  const vcAmount = Number(version.vc_amount ?? 0);
 
   return (
-    <Box sx={{ mt: 4, mb: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-      <StatsCard title={t('ktp_share')} value={`${ktpPercentage.toFixed(2)}%`} color="success.main" />
-      <StatsCard title={t('import_share')} value={`${importPercentage.toFixed(2)}%`} color="error.main" />
-      <StatsCard title={t('total_amount')} value={formatCurrency(totalAmount)} color="info.main" />
+    <Box sx={{ mt: 4, mb: 2 }}>
+        {/* Основные показатели */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2, mb: 2 }}>
+            <StatsCard title={t('ktp_share')} value={`${ktpPercentage.toFixed(2)}%`} color="success.main" />
+            <StatsCard title={t('import_share')} value={`${importPercentage.toFixed(2)}%`} color="error.main" />
+            <StatsCard title={t('total_amount')} value={formatCurrency(totalAmount)} color="info.main" />
+        </Box>
+        
+        {/* Показатели ВЦ */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
+            <StatsCard title={t('vc_mean')} value={`${vcMean.toFixed(2)}%`} color="primary.main" />
+            <StatsCard title={t('vc_median')} value={`${vcMedian.toFixed(2)}%`} color="primary.main" />
+            <StatsCard title={t('vc_amount')} value={formatCurrency(vcAmount)} color="primary.main" />
+        </Box>
     </Box>
   );
 };
@@ -69,6 +84,25 @@ const StatusChip = ({ status, isExecuted }: { status: PlanStatus, isExecuted: bo
   };
   const { label, color } = statusMap[status] || statusMap.DRAFT;
   return <Chip label={label} color={color as any} variant="outlined" sx={{ fontWeight: 'bold' }} />;
+};
+
+// Функция для форматирования номера позиции
+const formatItemNumber = (item: PlanItemVersion) => {
+    let number = `${item.item_number}`;
+    
+    // Используем revision_number для отображения номера редакции
+    if (item.revision_number > 0) {
+        number += `-${item.revision_number}`;
+    }
+
+    // Добавляем тип потребности
+    switch (item.need_type) {
+        case 'Товар': number += ' Т'; break;
+        case 'Работа': number += ' Р'; break;
+        case 'Услуга': number += ' У'; break;
+    }
+    
+    return number;
 };
 
 // ОПТИМИЗАЦИЯ: Выносим строку таблицы в отдельный мемоизированный компонент
@@ -114,7 +148,7 @@ const PlanItemRow = React.memo(({
             },
             }}
         >
-            <TableCell>{item.item_number}</TableCell>
+            <TableCell>{formatItemNumber(item)}</TableCell>
             <TableCell>{item.enstru?.name_ru || t('no_name')}</TableCell>
             <TableCell>
             <Chip label={item.is_ktp ? t('yes') : t('no')} color={item.is_ktp ? "success" : "default"} size="small" disabled={item.is_deleted} />
@@ -122,6 +156,11 @@ const PlanItemRow = React.memo(({
             <TableCell align="right">{item.quantity}</TableCell>
             <TableCell align="right">{formatCurrency(item.price_per_unit)}</TableCell>
             <TableCell align="right" sx={{ fontWeight: 'bold' }}>{formatCurrency(item.total_amount)}</TableCell>
+            
+            {/* Колонка Мин. ВЦ % */}
+            <TableCell align="center">
+                {item.min_dvc_percent ? `${Number(item.min_dvc_percent).toFixed(2)}%` : '-'}
+            </TableCell>
             
             {isApproved && (
                 <TableCell align="center">
@@ -252,11 +291,14 @@ export default function PlanForm() {
   const handleCreateNewVersion = async () => {
     if (!planId) return;
     if (window.confirm(t('confirm_create_version'))) {
+      setLoading(true);
       try {
         const newVersion = await createVersion(Number(planId));
         await loadPlan();
       } catch (err: any) {
         setError(err.response?.data?.detail || t('error_creating_version'));
+      } finally {
+        setLoading(false);
       }
     }
   };
@@ -391,6 +433,7 @@ export default function PlanForm() {
                     <TableCell align="right">{t('item_quantity')}</TableCell>
                     <TableCell align="right">{t('item_price')}</TableCell>
                     <TableCell align="right">{t('total_amount')}</TableCell>
+                    <TableCell align="center">{t('min_dvc_percent')}</TableCell>
                     {isApproved && <TableCell align="center">{t('status')}</TableCell>}
                     <TableCell align="center">{t('actions')}</TableCell>
                   </TableRow>
@@ -413,7 +456,7 @@ export default function PlanForm() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={isApproved ? 8 : 7} align="center" sx={{ py: 3 }}>
+                      <TableCell colSpan={isApproved ? 9 : 8} align="center" sx={{ py: 3 }}>
                         <Typography color="text.secondary">{t('no_items_in_plan')}</Typography>
                       </TableCell>
                     </TableRow>
