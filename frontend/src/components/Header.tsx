@@ -10,7 +10,7 @@ export default function Header() {
     <AppBar position="static" color="primary" elevation={4}>
       <Toolbar sx={{ justifyContent: 'space-between' }}>
         <Typography variant="h6" fontWeight="bold" sx={{ cursor: 'pointer' }} onClick={() => navigate('/')}>
-          Департамент развития внутристрановой ценности
+          {t('title')}
         </Typography>
 
         <Box display="flex" alignItems="center" gap={3}>

@@ -5,6 +5,7 @@ export type Lang = 'ru' | 'kk';
 
 const translations = {
   ru: {
+    title: 'Департамент развития внутристрановой ценности',
     // General
     open: 'Открыть',
     delete: 'Удалить',
@@ -92,6 +93,14 @@ const translations = {
     min_dvc_percent: 'Мин. ВЦ %',
     form_locked_warning: 'Форма заблокирована для редактирования. Создайте новую версию для внесения изменений.',
 
+    //ImportModal
+    import_items:'Импорт позиций',
+    import_instructions:'Инструкция по импорту',
+    download_template:'Скачать шаблон',
+    import_items_title:'Импорт позиций',
+    select_file:'Выберите файл',
+    upload:'Загрузить',
+
     // PlanItemForm
     item_form_edit_title: 'Редактирование позиции',
     item_form_new_title: 'Новая позиция сметы',
@@ -178,6 +187,7 @@ const translations = {
     error_loading_children: 'Ошибка загрузки дочерних элементов',
   },
   kk: {
+    title: 'Елішілік құндылықты дамыту департаменті',
     // General
     open: 'Ашу',
     delete: 'Жою',
@@ -218,9 +228,9 @@ const translations = {
     plan_id_year: 'ID: {id}, Жыл: {year}',
     creator: 'Жасаушы',
     export_to_excel: 'Excel-ге экспорттау',
-    edit_draft: 'Жобаны өңдеу',
+    edit_draft: 'Шимайды өңдеу',
     view_plan: 'Жоспарды қарау',
-    delete_draft_version_tooltip: 'Соңғы нұсқаны жою (жоба)',
+    delete_draft_version_tooltip: 'Соңғы нұсқаны жою (шимай)',
     delete_plan_tooltip: 'Жоспарды жою',
     confirm_delete_version: 'Бұл нұсқаны жойғыңыз келетініне сенімдісіз бе?',
     confirm_delete_plan: 'Бұл жоспарды жойғыңыз келетініне сенімдісіз бе?',
@@ -264,6 +274,15 @@ const translations = {
     quantity: 'Саны',
     min_dvc_percent: 'Мин. ВЦ %',
     form_locked_warning: 'Форма өңдеу үшін құлыпталған. Өзгерістер енгізу үшін жаңа нұсқа жасаңыз.',
+
+
+    //ImportModal
+    import_items:'Позицияларды импорттау',
+    import_instructions:'Импорттау нұсқаулары',
+    download_template:'Жүктеу үлгісі',
+    import_items_title:'Позицияларды импорттау',
+    select_file:'Файлды таңдаңыз',
+    upload:'Жүктеу',
 
     // SmetaItemForm
     item_form_edit_title: 'Позицияны редакциялау',
@@ -313,7 +332,7 @@ const translations = {
     error_bin_length: 'БСН 12 цифрдан тұруы керек.',
 
      // StatusChip
-    status_DRAFT: 'Жоба',
+    status_DRAFT: 'Шимай',
     status_PRE_APPROVED: 'Келісуде',
     status_APPROVED: 'Бекітілген',
     status_EXECUTED: 'Орындалды',

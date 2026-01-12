@@ -10,11 +10,12 @@ import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
   LockOpen as LockOpenIcon, CheckCircle as CheckCircleIcon, Download as DownloadIcon,
   Undo as UndoIcon, Assignment as AssignmentIcon, FileCopy as FileCopyIcon,
-  RadioButtonUnchecked as RadioButtonUncheckedIcon
+  RadioButtonUnchecked as RadioButtonUncheckedIcon, Upload as UploadIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n/index.tsx';
 import Header from '../components/Header';
 import ExecutionModal from '../components/ExecutionModal';
+import ImportModal from '../components/ImportModal';
 import {
   getPlanById, deleteItem, updateVersionStatus, exportVersionToExcel, revertItem, createVersion,
   PlanStatus
@@ -247,6 +248,9 @@ export default function PlanForm() {
   const [selectedItemAmount, setSelectedItemAmount] = useState(0);
   const [selectedItemPrice, setSelectedItemPrice] = useState(0);
 
+  // State for Import Modal
+  const [isImportModalOpen, setImportModalOpen] = useState(false);
+
   const loadPlan = useCallback(async () => {
     if (!planId) return;
     try {
@@ -380,6 +384,15 @@ export default function PlanForm() {
             </Stack>
           </Box>
           <Stack direction="row" spacing={2}>
+            {isEditable && (
+                <Button 
+                    variant="outlined" 
+                    startIcon={<UploadIcon />} 
+                    onClick={() => setImportModalOpen(true)}
+                >
+                    {t('import_items')}
+                </Button>
+            )}
             <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}>
               {t('export_to_excel')}
             </Button>
@@ -489,6 +502,15 @@ export default function PlanForm() {
           planQuantity={selectedItemQuantity}
           planAmount={selectedItemAmount}
           planPricePerUnit={selectedItemPrice}
+        />
+      )}
+
+      {planId && (
+        <ImportModal 
+            open={isImportModalOpen}
+            onClose={() => setImportModalOpen(false)}
+            planId={Number(planId)}
+            onSuccess={loadPlan}
         />
       )}
     </>

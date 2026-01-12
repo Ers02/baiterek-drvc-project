@@ -212,14 +212,16 @@ def create_new_version_for_editing(db: Session, plan_id: int, user: models.User)
                 new_item_data['root_item_id'] = item.root_item_id if item.root_item_id else item.id
                 new_item_data['source_version_id'] = item.source_version_id if item.source_version_id else current_active_version.id
                 
-                # revision_number копируется автоматически, так как он есть в new_item_data
-                
                 new_items.append(models.PlanItemVersion(**new_item_data))
 
         if new_items:
             db.bulk_save_objects(new_items)
 
         db.commit()
+        
+        # Пересчитываем метрики для новой версии, чтобы заполнить поля ВЦ
+        _recalculate_version_metrics(db, new_version.id)
+        
         db.refresh(new_version)
         return new_version
     except Exception:

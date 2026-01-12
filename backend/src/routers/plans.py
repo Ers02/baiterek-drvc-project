@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
 import io
 from ..database.database import get_db
 from ..schemas import plan as plan_schema
-from ..services import plan_service
+from ..services import plan_service, import_service
 from ..utils.auth import get_current_user
 from ..models import models
 
@@ -167,3 +167,25 @@ def create_plan_item_for_active_version(
         raise HTTPException(status_code=403, detail="Нет прав для добавления в эту смету")
 
     return plan_service.add_item_to_plan(db=db, plan_id=plan_id, item_in=item_in, user=current_user)
+
+# ========= Эндпоинты для Импорта =========
+
+@router.get("/template/download", tags=["Import"])
+def download_import_template(db: Session = Depends(get_db)):
+    """Скачать Excel-шаблон для импорта позиций."""
+    excel_data = import_service.generate_import_template(db)
+    return StreamingResponse(
+        io.BytesIO(excel_data),
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': 'attachment; filename="import_template.xlsx"'}
+    )
+
+@router.post("/{plan_id}/import", tags=["Import"])
+def import_items_from_file(
+    plan_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Импортировать позиции из Excel файла в активную версию плана."""
+    return import_service.process_import_file(db=db, plan_id=plan_id, file=file, user=current_user)

@@ -94,7 +94,8 @@ export default function PlanItemForm() {
   const handleSave = async () => {
     if (isFormLocked) return;
     
-    if (!formData.enstru?.code || !formData.expense_item?.id || !formData.funding_source?.id || !formData.unit?.id) {
+    // Валидация обязательных полей
+    if (!formData.enstru?.code || !formData.expense_item?.id || !formData.funding_source?.id || !formData.unit?.id || !formData.kato_purchase?.id || !formData.kato_delivery?.id) {
       setError(t('error_fill_required_fields'));
       return;
     }
@@ -257,10 +258,24 @@ export default function PlanItemForm() {
                     renderInput={(params) => <TextField {...params} label={t('funding_source')} required />} 
                 />
                 
-                <TextField label={t('kato_purchase')} value={formData.kato_purchase ? (lang === 'ru' ? formData.kato_purchase.name_ru : formData.kato_purchase.name_kz) : ''} InputProps={{ readOnly: true }} onClick={() => !isFormLocked && setKatoPurchaseModalOpen(true)} disabled={isFormLocked} />
+                <TextField 
+                    label={t('kato_purchase')} 
+                    value={formData.kato_purchase ? (lang === 'ru' ? formData.kato_purchase.name_ru : formData.kato_purchase.name_kz) : ''} 
+                    InputProps={{ readOnly: true }} 
+                    onClick={() => !isFormLocked && setKatoPurchaseModalOpen(true)} 
+                    disabled={isFormLocked} 
+                    required // Добавил required
+                />
                 <KatoModalSelect open={isKatoPurchaseModalOpen} onClose={() => setKatoPurchaseModalOpen(false)} onSelect={(kato) => setFormData(prev => ({ ...prev, kato_purchase: kato }))} currentValue={formData.kato_purchase || null} label={t('select_kato_purchase')} />
 
-                <TextField label={t('kato_delivery')} value={formData.kato_delivery ? (lang === 'ru' ? formData.kato_delivery.name_ru : formData.kato_delivery.name_kz) : ''} InputProps={{ readOnly: true }} onClick={() => !isFormLocked && setKatoDeliveryModalOpen(true)} disabled={isFormLocked} />
+                <TextField 
+                    label={t('kato_delivery')} 
+                    value={formData.kato_delivery ? (lang === 'ru' ? formData.kato_delivery.name_ru : formData.kato_delivery.name_kz) : ''} 
+                    InputProps={{ readOnly: true }} 
+                    onClick={() => !isFormLocked && setKatoDeliveryModalOpen(true)} 
+                    disabled={isFormLocked} 
+                    required // Добавил required
+                />
                 <KatoModalSelect open={isKatoDeliveryModalOpen} onClose={() => setKatoDeliveryModalOpen(false)} onSelect={(kato) => setFormData(prev => ({ ...prev, kato_delivery: kato }))} currentValue={formData.kato_delivery || null} label={t('select_kato_delivery')} />
 
                 <FormControlLabel control={<Checkbox checked={formData.is_ktp || false} disabled />} label={t('is_ktp_label')} />

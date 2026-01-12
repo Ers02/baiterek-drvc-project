@@ -85,6 +85,27 @@ export const createExecution = (data: ExecutionPayload): Promise<Execution> => a
 export const getExecutionsByItem = (itemId: number): Promise<Execution[]> => api.get(`/executions/by-item/${itemId}`).then(res => res.data);
 export const deleteExecution = (executionId: number): Promise<void> => api.delete(`/executions/${executionId}`);
 
+// --- API для Импорта ---
+export const downloadImportTemplate = async (): Promise<void> => {
+    const response = await api.get('/plans/template/download', { responseType: 'blob' });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'import_template.xlsx');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+};
+
+export const importItems = (planId: number, file: File): Promise<{ message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/plans/${planId}/import`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(res => res.data);
+};
+
+
 export default api;
 export { PlanStatus };
 export type { 

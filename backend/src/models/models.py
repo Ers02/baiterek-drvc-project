@@ -135,7 +135,8 @@ class PlanItemVersion(Base):
     version = relationship("ProcurementPlanVersion", back_populates="items", foreign_keys=[version_id])
     source_version = relationship("ProcurementPlanVersion", foreign_keys=[source_version_id])
     
-    root_item = relationship("PlanItemVersion", remote_side=[id], foreign_keys=[root_item_id])
+    # Добавляем post_update=True, чтобы разрешить циклические зависимости при вставке
+    root_item = relationship("PlanItemVersion", remote_side=[id], foreign_keys=[root_item_id], post_update=True)
     
     enstru = relationship("Enstru")
     unit = relationship("Mkei")
