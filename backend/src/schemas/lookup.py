@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date
+from datetime import datetime
 
 # Схема для User (для отображения в других схемах)
 class UserLookup(BaseModel):
@@ -60,16 +60,43 @@ class SourceFunding(BaseModel):
     class Config:
         from_attributes = True
 
-# Схема для Enstru
+# Схема для Enstru (Обновленная)
 class Enstru(BaseModel):
     id: int
     code: str
-    name_ru: str
-    name_kz: str
-    type_ru: str
-    type_kz: str
-    specs_ru: Optional[str] = None
-    specs_kz: Optional[str] = None
+    name_rus: Optional[str] = None
+    name_kaz: Optional[str] = None
+    name_eng: Optional[str] = None
+    type_name: Optional[str] = None # GOODS, WORKS, SERVICES
+    detail_rus: Optional[str] = None
+    detail_kaz: Optional[str] = None
+    detail_eng: Optional[str] = None
+    uom: Optional[str] = None
+    
+    # Для совместимости со старым кодом (опционально, можно убрать, если везде обновим)
+    @property
+    def name_ru(self):
+        return self.name_rus
+    
+    @property
+    def name_kz(self):
+        return self.name_kaz
+        
+    @property
+    def type_ru(self):
+        # Маппинг type_name на старый type_ru
+        if self.type_name == 'GOODS': return 'Товар'
+        if self.type_name == 'WORKS': return 'Работа'
+        if self.type_name == 'SERVICES': return 'Услуга'
+        return self.type_name
+
+    @property
+    def specs_ru(self):
+        return self.detail_rus
+
+    @property
+    def specs_kz(self):
+        return self.detail_kaz
 
     class Config:
         from_attributes = True

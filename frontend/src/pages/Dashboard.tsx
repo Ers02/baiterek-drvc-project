@@ -398,6 +398,7 @@ export default function Dashboard() {
               variant="outlined"
               value={newPlanName}
               onChange={(e) => setNewPlanName(e.target.value)}
+              inputProps={{ maxLength: 80 }}
             />
             <TextField
               required

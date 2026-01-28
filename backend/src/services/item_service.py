@@ -9,7 +9,14 @@ from .plan_service import _recalculate_version_metrics
 def get_item(db: Session, item_id: int) -> models.PlanItemVersion | None:
     """Получает конкретную позицию плана по ее ID, если она не удалена."""
     return db.query(models.PlanItemVersion).options(
-        joinedload(models.PlanItemVersion.version).joinedload(models.ProcurementPlanVersion.plan)
+        joinedload(models.PlanItemVersion.version).joinedload(models.ProcurementPlanVersion.plan),
+        joinedload(models.PlanItemVersion.enstru),
+        joinedload(models.PlanItemVersion.unit),
+        joinedload(models.PlanItemVersion.expense_item),
+        joinedload(models.PlanItemVersion.funding_source),
+        joinedload(models.PlanItemVersion.agsk),
+        joinedload(models.PlanItemVersion.kato_purchase),
+        joinedload(models.PlanItemVersion.kato_delivery)
     ).filter(
         models.PlanItemVersion.id == item_id,
         models.PlanItemVersion.is_deleted == False
@@ -30,6 +37,21 @@ def update_item(db: Session, item_id: int, item_in: plan_schema.PlanItemUpdate, 
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав для редактирования этой позиции.")
 
     update_data = item_in.model_dump(exclude_unset=True)
+    
+    # Проверка и очистка АГСК
+    expense_item_id = update_data.get('expense_item_id')
+    if expense_item_id:
+        expense_item = db.query(models.Cost_Item).filter(models.Cost_Item.id == expense_item_id).first()
+        # Более мягкая проверка на СМР (регистронезависимая и на вхождение)
+        if expense_item and "смр" not in expense_item.name_ru.lower():
+            update_data['agsk_id'] = None
+    elif 'expense_item_id' not in update_data:
+        # Если статья затрат не меняется, проверяем текущую
+        if db_item.expense_item and "смр" not in db_item.expense_item.name_ru.lower():
+             # Если текущая не СМР, но пытаются обновить agsk_id (вдруг), то сбрасываем
+             if 'agsk_id' in update_data:
+                 update_data['agsk_id'] = None
+
     for key, value in update_data.items():
         setattr(db_item, key, value)
 
@@ -39,13 +61,17 @@ def update_item(db: Session, item_id: int, item_in: plan_schema.PlanItemUpdate, 
     if 'trucode' in update_data:
         enstru_item = db.query(models.Enstru).filter(models.Enstru.code == update_data['trucode']).first()
         if enstru_item:
-            db_item.need_type = models.NeedType(enstru_item.type_ru)
+            # Маппинг type_name на NeedType (Исправлено: WORK, SERVICE)
+            need_type_map = {
+                'GOODS': models.NeedType.GOODS,
+                'WORK': models.NeedType.WORKS,
+                'SERVICE': models.NeedType.SERVICES
+            }
+            db_item.need_type = need_type_map.get(enstru_item.type_name, models.NeedType.GOODS)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Код ЕНС ТРУ '{update_data['trucode']}' не найден.")
 
     # ЛОГИКА РЕДАКЦИЙ:
-    # Если source_version_id отличается от текущей версии, значит это первое изменение в этой версии.
-    # Мы должны увеличить счетчик редакций.
     if db_item.source_version_id != version.id:
         db_item.revision_number += 1
         db_item.source_version_id = version.id
@@ -116,9 +142,10 @@ def revert_item(db: Session, item_id: int, user: models.User) -> models.PlanItem
     fields_to_copy = [
         'trucode', 'unit_id', 'expense_item_id', 'funding_source_id',
         'agsk_id', 'kato_purchase_id', 'kato_delivery_id',
+        'additional_specs', 'additional_specs_kz',
         'quantity', 'price_per_unit', 'total_amount',
-        'is_ktp', 'is_resident', 'need_type',
-        'revision_number' # Восстанавливаем номер редакции
+        'is_ktp', 'resident_share', 'non_resident_reason', 'need_type',
+        'revision_number'
     ]
     
     for field in fields_to_copy:

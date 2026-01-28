@@ -97,12 +97,35 @@ export const downloadImportTemplate = async (): Promise<void> => {
     link.remove();
 };
 
-export const importItems = (planId: number, file: File): Promise<{ message: string }> => {
+export const importItems = (planId: number, file: File): Promise<any> => {
     const formData = new FormData();
     formData.append('file', file);
     return api.post(`/plans/${planId}/import`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-    }).then(res => res.data);
+        responseType: 'blob', // Важно! Ожидаем blob, но если будет JSON, axios его распарсит? Нет, нужно проверять тип контента.
+    }).then(res => {
+        // Проверяем тип контента
+        const contentType = res.headers['content-type'];
+        if (contentType && contentType.includes('application/json')) {
+            // Если это JSON (успех), нам нужно прочитать blob как текст и распарсить
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const json = JSON.parse(reader.result as string);
+                        resolve(json);
+                    } catch (e) {
+                        reject(e);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsText(res.data);
+            });
+        } else {
+            // Если это файл (ошибки)
+            return res.data;
+        }
+    });
 };
 
 

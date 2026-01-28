@@ -10,7 +10,7 @@ import enum
 
 class PlanStatus(str, enum.Enum):
     DRAFT = "DRAFT"
-    PRE_APPROVED = "PRE_APPROVED"
+    PRE_APPROVED = "PRE_APPROVED",
     APPROVED = "APPROVED"
 
 
@@ -60,12 +60,12 @@ class ProcurementPlanVersion(Base):
     status = Column(Enum(PlanStatus), nullable=False)
 
     total_amount = Column(Numeric(20, 2), default=0)
-    ktp_percentage = Column(Numeric(5, 2))
+    # ktp_percentage удален
     import_percentage = Column(Numeric(5, 2))
     
     # Новые поля для статистики ВЦ (Value Creation)
-    vc_mean = Column(Numeric(5, 2), default=0) # Среднее значение
-    vc_median = Column(Numeric(5, 2), default=0) # Медиана
+    vc_percentage = Column(Numeric(5, 2), default=0) # Взвешенный процент ВЦ
+    # vc_median удален
     vc_amount = Column(Numeric(20, 2), default=0) # Количественное (сумма)
 
     is_active = Column(Boolean, default=True)
@@ -109,33 +109,38 @@ class PlanItemVersion(Base):
     agsk_id = Column(String(50), ForeignKey("agsk.code"))
     kato_purchase_id = Column(Integer, ForeignKey("kato.id"))
     kato_delivery_id = Column(Integer, ForeignKey("kato.id"))
+    
+    additional_specs = Column(Text, nullable=True)
+    additional_specs_kz = Column(Text, nullable=True)
 
     quantity = Column(Numeric(12, 3), nullable=False)
     price_per_unit = Column(Numeric(18, 2), nullable=False)
     total_amount = Column(Numeric(18, 2), nullable=False)
 
     is_ktp = Column(Boolean, default=False)
-    is_resident = Column(Boolean, default=False)
+    
+    # Новые поля для резидентства
+    resident_share = Column(Numeric(5, 2), default=100, nullable=False)
+    non_resident_reason = Column(Text, nullable=True)
     
     is_deleted = Column(Boolean, default=False, nullable=False)
     
     root_item_id = Column(Integer, ForeignKey("plan_item_versions.id"), index=True, nullable=True)
     source_version_id = Column(Integer, ForeignKey("procurement_plan_versions.id"), nullable=True)
     
-    # Новое поле: номер редакции (0 - оригинал, 1 - первая правка и т.д.)
-    revision_number = Column(Integer, default=0, nullable=False,server_default=text('0'))
+    revision_number = Column(Integer, default=0, nullable=False)
     
     executed_quantity = Column(Numeric(12, 3), default=0, nullable=False)
     executed_amount = Column(Numeric(18, 2), default=0, nullable=False)
     
     min_dvc_percent = Column(Numeric(5, 2), default=0)
+    vc_amount = Column(Numeric(18, 2), default=0) # Новое поле: сумма ВЦ по позиции
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     version = relationship("ProcurementPlanVersion", back_populates="items", foreign_keys=[version_id])
     source_version = relationship("ProcurementPlanVersion", foreign_keys=[source_version_id])
     
-    # Добавляем post_update=True, чтобы разрешить циклические зависимости при вставке
     root_item = relationship("PlanItemVersion", remote_side=[id], foreign_keys=[root_item_id], post_update=True)
     
     enstru = relationship("Enstru")
@@ -149,7 +154,7 @@ class PlanItemVersion(Base):
     executions = relationship("PlanItemExecution", back_populates="plan_item", cascade="all, delete-orphan")
 
     __table_args__ = (
-        UniqueConstraint("version_id", "item_number", name="uq_version_item"),
+        UniqueConstraint("version_id", "item_number", "need_type", name="uq_version_item_type"),
     )
     
     @property
@@ -225,39 +230,50 @@ class Source_Funding(Base):
 
 class Enstru(Base):
     __tablename__ = "enstru"
+
     id = Column(Integer, primary_key=True)
-    code = Column(String(35), unique=True, nullable=False)
-    name_ru = Column(Text, nullable=False)
-    name_kz = Column(Text, nullable=False)
-    type_ru = Column(Text, nullable=False)
-    type_kz = Column(Text, nullable=False)
-    specs_ru = Column(Text, nullable=True)
-    specs_kz = Column(Text, nullable=True)
+    standard = Column(Text, nullable=True)  # standard
+    detail_rus = Column(Text, nullable=True)  # detail_rus
+    type_name = Column(String(50), nullable=True)  # type_name (например: GOODS)
+    code = Column(String(35), nullable=False, unique=True)  # code
+    is_active = Column(Boolean, default=True)  # is_active
+    name_rus = Column(Text, nullable=True)  # name_rus
+    modify_datetime = Column(DateTime, nullable=True)  # modify_datetime
+    name_kaz = Column(Text, nullable=True)  # name_kaz
+    type = Column(String(20), nullable=True)  # type (например: "1")
+    detail_eng = Column(Text, nullable=True)  # detail_eng
+    uom = Column(String(50), nullable=True)  # uom (например: "166,0168")
+    name_eng = Column(Text, nullable=True)  # name_eng
+    detail_kaz = Column(Text, nullable=True)  # detail_kaz
+    create_datetime = Column(DateTime, nullable=True)  # create_datetime
+    new_code = Column(String(35), nullable=True)  # new_code
+    purchasing_group_name = Column(Text, nullable=True)  # purchasing_group_name
+    purchasing_subgroup_name = Column(Text, nullable=True)  # purchasing_subgroup_name
 
 class Reestr_KTP(Base):
     __tablename__ = "reestr_ktp"
 
     id = Column(Integer, primary_key=True, index=True)
-    product_code = Column(String(50), nullable=True)          # Код товара (иногда содержит буквы)
-    registration_number = Column(String(50), nullable=True)   # Рег. номер (может быть длинным)
-    bin_iin = Column(String(12), nullable=False, index=True)  # БИН/ИИН всегда 12 символов
-    company_name = Column(String(500), nullable=False)        # Название компании
-    oked_codes = Column(String(50), nullable=True)            # Коды ОКЭД
-    oked_names = Column(Text, nullable=True)                  # Расшифровка ОКЭД
-    region_kato = Column(String(50), nullable=True)           # Код или название региона
-    production_address = Column(Text, nullable=True)          # Адрес производства
-    website = Column(String(255), nullable=True)              # Сайт
-    phone = Column(String(100), nullable=True)                # Телефон (строка, т.к. могут быть скобки/дефисы)
-    email = Column(String(255), nullable=True)                # Email
-    product_name = Column(Text, nullable=False)               # Наименование товара
-    production_capacity = Column(String(255), nullable=True)  # Мощность (может быть "100 тонн в год")
-    tnved_code_10 = Column(String(10), nullable=True)         # ТНВЭД (обычно 10 цифр)
-    kpved_code = Column(String(20), nullable=True)            # КПВЭД код
-    kpved_name = Column(Text, nullable=True)                  # КПВЭД название
-    enstru_code = Column(String(50), nullable=True)           # ЕНС ТРУ код
-    enstru_name = Column(Text, nullable=True)                 # ЕНС ТРУ название
-    agsk3_code = Column(String(50), nullable=True)            # АГСК код
-    agsk3_name = Column(Text, nullable=True)                  # АГСК название
-    dvc_percent = Column(Float, nullable=True)                # Доля внутристрановой ценности (%)
-    localization_level = Column(Integer, nullable=True)       # Уровень локализации (число)
-    registry_inclusion_date = Column(Date, nullable=True)     # Дата включения в реестр
+    product_code = Column(String(50), nullable=True)
+    registration_number = Column(String(50), nullable=True)
+    bin_iin = Column(String(12), nullable=False, index=True)
+    company_name = Column(String(500), nullable=False)
+    oked_codes = Column(String(50), nullable=True)
+    oked_names = Column(Text, nullable=True)
+    region_kato = Column(String(50), nullable=True)
+    production_address = Column(Text, nullable=True)
+    website = Column(String(255), nullable=True)
+    phone = Column(String(100), nullable=True)
+    email = Column(String(255), nullable=True)
+    product_name = Column(Text, nullable=False)
+    production_capacity = Column(String(255), nullable=True)
+    tnved_code_10 = Column(String(10), nullable=True)
+    kpved_code = Column(String(20), nullable=True)
+    kpved_name = Column(Text, nullable=True)
+    enstru_code = Column(String(50), nullable=True)
+    enstru_name = Column(Text, nullable=True)
+    agsk3_code = Column(String(50), nullable=True)
+    agsk3_name = Column(Text, nullable=True)
+    dvc_percent = Column(Float, nullable=True)
+    localization_level = Column(String(20), nullable=True)
+    registry_inclusion_date = Column(Date, nullable=True)

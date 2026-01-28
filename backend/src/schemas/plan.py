@@ -10,12 +10,12 @@ from . import lookup as lookup_schema
 class ProcurementPlanVersionBase(BaseModel):
     status: PlanStatus
     total_amount: Decimal = Field(default=0)
-    ktp_percentage: Optional[Decimal] = Field(default=0)
+    # ktp_percentage удален
     import_percentage: Optional[Decimal] = Field(default=0)
     
     # Новые поля для ВЦ
-    vc_mean: Optional[Decimal] = Field(default=0)
-    vc_median: Optional[Decimal] = Field(default=0)
+    vc_percentage: Optional[Decimal] = Field(default=0) # Переименовано из vc_mean
+    # vc_median удален
     vc_amount: Optional[Decimal] = Field(default=0)
     
     is_active: bool
@@ -41,10 +41,16 @@ class PlanItemBase(BaseModel):
     agsk_id: Optional[str] = None
     kato_purchase_id: Optional[int] = None
     kato_delivery_id: Optional[int] = None
+    additional_specs: Optional[str] = None
+    additional_specs_kz: Optional[str] = None
     quantity: Decimal = Field(..., gt=0, description="Количество")
     price_per_unit: Decimal = Field(..., gt=0, description="Цена за единицу")
     is_ktp: bool = False
-    is_resident: bool = False
+    
+    # Новые поля для резидентства
+    resident_share: Decimal = Field(default=100, ge=0, le=100)
+    non_resident_reason: Optional[str] = None
+    min_dvc_percent: Optional[Decimal] = Field(default=0, ge=0, le=100)
 
 class PlanItemCreate(PlanItemBase):
     pass
@@ -54,10 +60,19 @@ class PlanItemUpdate(PlanItemBase):
     unit_id: Optional[int] = None
     expense_item_id: Optional[int] = None
     funding_source_id: Optional[int] = None
+    agsk_id: Optional[str] = None
+    kato_purchase_id: Optional[int] = None
+    kato_delivery_id: Optional[int] = None
+    additional_specs: Optional[str] = None
+    additional_specs_kz: Optional[str] = None
     quantity: Optional[Decimal] = Field(None, gt=0)
     price_per_unit: Optional[Decimal] = Field(None, gt=0)
     is_ktp: Optional[bool] = None
-    is_resident: Optional[bool] = None
+    
+    # Новые поля для резидентства
+    resident_share: Optional[Decimal] = Field(None, ge=0, le=100)
+    non_resident_reason: Optional[str] = None
+    min_dvc_percent: Optional[Decimal] = Field(None, ge=0, le=100)
 
 class PlanItem(BaseModel):
     id: int
@@ -69,7 +84,11 @@ class PlanItem(BaseModel):
     price_per_unit: Decimal
     total_amount: Decimal
     is_ktp: bool
-    is_resident: bool
+    
+    # Новые поля для резидентства
+    resident_share: Decimal
+    non_resident_reason: Optional[str] = None
+    
     is_deleted: bool
     created_at: datetime
     
@@ -83,8 +102,12 @@ class PlanItem(BaseModel):
     executed_amount: Decimal = Field(default=0)
     
     min_dvc_percent: Decimal = Field(default=0)
+    vc_amount: Decimal = Field(default=0) # Добавлено поле
     
     start_version_number: int
+    
+    additional_specs: Optional[str] = None
+    additional_specs_kz: Optional[str] = None
 
     enstru: Optional[lookup_schema.Enstru] = None
     unit: Optional[lookup_schema.Mkei] = None

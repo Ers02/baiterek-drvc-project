@@ -4,7 +4,19 @@ export interface Kato { id: number; parent_id: number | null; code: string; name
 export interface Agsk { id: number; group: string; code: string; name_ru: string; }
 export interface CostItem { id: number; name_ru: string; name_kz: string; }
 export interface SourceFunding { id: number; name_ru: string; name_kz: string; }
-export interface Enstru { id: number; code: string; name_ru: string; name_kz: string; type_ru: string; specs_ru?: string; }
+
+// Обновленный интерфейс Enstru
+export interface Enstru { 
+    id: number; 
+    code: string; 
+    name_rus: string; 
+    name_kaz: string; 
+    type_name: string; // GOODS, WORKS, SERVICES
+    detail_rus?: string; 
+    detail_kaz?: string;
+    uom?: string;
+}
+
 export interface UserLookup { id: number; full_name: string; }
 
 // --- Основные Типы ---
@@ -25,7 +37,11 @@ export interface PlanItemVersion {
   price_per_unit: number;
   total_amount: number;
   is_ktp: boolean;
-  is_resident: boolean;
+  
+  // Новые поля для резидентства
+  resident_share: number;
+  non_resident_reason?: string;
+  
   is_deleted: boolean;
   created_at: string;
   version: ProcurementPlanVersion; // Для контекста
@@ -35,7 +51,7 @@ export interface PlanItemVersion {
   source_version_id?: number;
   source_version?: ProcurementPlanVersion;
   start_version_number: number;
-  revision_number: number; // Номер редакции
+  revision_number: number;
   
   // Новые поля для статуса исполнения
   executed_quantity: number;
@@ -43,6 +59,10 @@ export interface PlanItemVersion {
   
   // Новое поле для ВЦ
   min_dvc_percent: number;
+  
+  additional_specs?: string;
+  additional_specs_kz?: string;
+  vc_amount: number;
 
   enstru?: Enstru;
   unit?: Mkei;
@@ -59,12 +79,10 @@ export interface ProcurementPlanVersion {
   version_number: number;
   status: PlanStatus;
   total_amount: number;
-  ktp_percentage: number;
   import_percentage: number;
   
   // Новые поля для ВЦ
-  vc_mean: number;
-  vc_median: number;
+  vc_percentage: number;
   vc_amount: number;
   
   is_active: boolean;
@@ -91,10 +109,16 @@ export interface PlanItemPayload {
   agsk_id?: string;
   kato_purchase_id?: number;
   kato_delivery_id?: number;
+  additional_specs?: string;
+  additional_specs_kz?: string;
   quantity: number;
   price_per_unit: number;
   is_ktp: boolean;
-  is_resident: boolean;
+  
+  // Новые поля для резидентства
+  resident_share?: number;
+  non_resident_reason?: string;
+  min_dvc_percent?: number;
 }
 
 // --- Типы для Исполнения (Execution) ---

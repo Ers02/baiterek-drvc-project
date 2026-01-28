@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import {
     Dialog, DialogTitle, DialogContent, DialogActions, Button,
-    Typography, Box, Alert, CircularProgress, List, ListItem, ListItemText
+    Typography, Box, Alert, CircularProgress, Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
-import { CloudUpload as UploadIcon, Download as DownloadIcon } from '@mui/icons-material';
+import { CloudUpload as UploadIcon, Download as DownloadIcon, ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
 import { useTranslation } from '../i18n/index.tsx';
 import { downloadImportTemplate, importItems } from '../services/api';
 
@@ -19,13 +19,11 @@ const ImportModal: React.FC<ImportModalProps> = ({ open, onClose, planId, onSucc
     const [file, setFile] = useState<File | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         if (event.target.files && event.target.files[0]) {
             setFile(event.target.files[0]);
             setError(null);
-            setValidationErrors([]);
         }
     };
 
@@ -42,32 +40,53 @@ const ImportModal: React.FC<ImportModalProps> = ({ open, onClose, planId, onSucc
 
         setLoading(true);
         setError(null);
-        setValidationErrors([]);
 
         try {
-            await importItems(planId, file);
-            onSuccess();
-            onClose();
-        } catch (err: any) {
-            if (err.response?.data?.detail?.errors) {
-                setValidationErrors(err.response.data.detail.errors);
-                setError(t('import_validation_error'));
+            const response = await importItems(planId, file);
+            
+            if (response instanceof Blob && response.type.includes('sheet')) {
+                const url = window.URL.createObjectURL(response);
+                const link = document.createElement('a');
+                link.href = url;
+                link.setAttribute('download', 'import_errors.xlsx');
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setError(t('import_validation_error_file'));
             } else {
-                setError(err.response?.data?.detail || t('error_importing_file'));
+                onSuccess();
+                onClose();
             }
+        } catch (err: any) {
+            setError(err.response?.data?.detail || t('error_importing_file'));
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+        <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
             <DialogTitle>{t('import_items_title')}</DialogTitle>
             <DialogContent>
+                
+                <Accordion sx={{ my: 2 }}>
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography>{t('import_instructions')}</Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                        <Box sx={{
+                            '& p': { my: 1 },
+                            '& ol': { pl: 3 },
+                            '& ul': { pl: 3 },
+                            '& li': { mb: 1 },
+                            '& b': { fontWeight: 'bold' }
+                        }}>
+                            <Typography component="div" dangerouslySetInnerHTML={{ __html: t('import_instructions_text') }} />
+                        </Box>
+                    </AccordionDetails>
+                </Accordion>
+
                 <Box sx={{ mb: 3, textAlign: 'center' }}>
-                    <Typography variant="body2" gutterBottom>
-                        {t('import_instructions')}
-                    </Typography>
                     <Button 
                         variant="outlined" 
                         startIcon={<DownloadIcon />} 
@@ -102,18 +121,6 @@ const ImportModal: React.FC<ImportModalProps> = ({ open, onClose, planId, onSucc
                 
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
                 
-                {validationErrors.length > 0 && (
-                    <Alert severity="warning" sx={{ mb: 2 }}>
-                        <Typography variant="subtitle2">{t('validation_errors')}:</Typography>
-                        <List dense sx={{ maxHeight: 150, overflow: 'auto' }}>
-                            {validationErrors.map((err, index) => (
-                                <ListItem key={index}>
-                                    <ListItemText primary={err} />
-                                </ListItem>
-                            ))}
-                        </List>
-                    </Alert>
-                )}
             </DialogContent>
             <DialogActions>
                 <Button onClick={onClose}>{t('cancel')}</Button>
