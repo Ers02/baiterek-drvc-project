@@ -36,45 +36,54 @@ def _recalculate_version_metrics(db: Session, version_id: int):
 
     total_amount = Decimal('0.00')
     vc_amount_total = Decimal('0.00')
+    
+    executed_amount_total = Decimal('0.00')
+    executed_vc_amount_total = Decimal('0.00')
 
     for item in items:
         total_amount += item.total_amount
         
         # Логика определения min_dvc_percent
         if item.need_type == models.NeedType.GOODS:
-            # Для товаров ищем в реестре КТП
             min_dvc = db.query(func.min(models.Reestr_KTP.dvc_percent)).filter(
                 models.Reestr_KTP.enstru_code == item.trucode
             ).scalar()
             item_dvc_percent = Decimal(str(min_dvc)) if min_dvc is not None else Decimal('0.00')
         else:
-            # Для работ и услуг берем из доли местного содержания (resident_share)
-            # resident_share уже хранится в модели, используем его
             item_dvc_percent = item.resident_share if item.resident_share is not None else Decimal('0.00')
 
         item.min_dvc_percent = item_dvc_percent
         
         item_vc_amount = item.total_amount * (item_dvc_percent / Decimal('100.00'))
-        item.vc_amount = item_vc_amount # Сохраняем сумму ВЦ в позицию
+        item.vc_amount = item_vc_amount
         
-        db.add(item)
+        db.add(item) # Сохраняем обновленные данные по ВЦ самой позиции
         
-        vc_amount_total += item_vc_amount
+        # Агрегируем уже рассчитанные данные по исполнению из самой позиции
+        vc_amount_total += item.vc_amount
+        executed_amount_total += item.executed_amount if item.executed_amount is not None else Decimal('0.00')
+        executed_vc_amount_total += item.executed_vc_amount if item.executed_vc_amount is not None else Decimal('0.00')
 
     if total_amount > 0:
-        # Доля импорта = (Общая сумма - Сумма ВЦ) / Общая сумма * 100
         import_percentage = ((total_amount - vc_amount_total) / total_amount) * 100
-        # Взвешенный процент ВЦ = (Сумма ВЦ / Общая сумма) * 100
         vc_percentage = (vc_amount_total / total_amount) * 100
     else:
         import_percentage = Decimal('0.00')
         vc_percentage = Decimal('0.00')
+        
+    if executed_amount_total > 0:
+        executed_vc_percentage = (executed_vc_amount_total / executed_amount_total) * 100
+    else:
+        executed_vc_percentage = Decimal('0.00')
 
     version.total_amount = total_amount
     version.import_percentage = import_percentage
     
     version.vc_percentage = vc_percentage
     version.vc_amount = vc_amount_total
+    
+    version.executed_vc_amount = executed_vc_amount_total
+    version.executed_vc_percentage = executed_vc_percentage
 
     db.commit()
     db.refresh(version)
@@ -242,10 +251,6 @@ def delete_latest_version(db: Session, plan_id: int, user: models.User):
         if not previous_version:
              raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Предыдущая версия не найдена для восстановления.")
 
-        db.query(models.PlanItemVersion).filter(
-            models.PlanItemVersion.version_id == active_version.id
-        ).delete(synchronize_session=False)
-
         db.delete(active_version)
 
         previous_version.is_active = True
@@ -397,24 +402,24 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
     ws.title = "Смета"
     
     # Заголовок и информация о проекте
-    ws.merge_cells('A1:S1')
+    ws.merge_cells('A1:Q1')
     ws['A1'] = "СМЕТА ЗАКУПОК"
     ws['A1'].font = Font(size=16, bold=True)
     ws['A1'].alignment = Alignment(horizontal='center')
     
     # Наименование проекта
-    ws.merge_cells('A2:S2')
+    ws.merge_cells('A2:Q2')
     ws['A2'] = f"Наименование проекта: {version_with_items.plan.plan_name}"
     ws['A2'].font = Font(bold=True, size=12)
     
     # Год
-    ws.merge_cells('A3:S3')
+    ws.merge_cells('A3:Q3')
     ws['A3'] = f"Год: {version_with_items.plan.year}"
     ws['A3'].font = Font(bold=True, size=12)
     
     # Наименование клиента
     client_name = version_with_items.plan.creator.org_name if version_with_items.plan.creator and version_with_items.plan.creator.org_name else "Не указано"
-    ws.merge_cells('A4:S4')
+    ws.merge_cells('A4:Q4')
     ws['A4'] = f"Наименование клиента: {client_name}"
     ws['A4'].font = Font(bold=True, size=12)
     
@@ -423,20 +428,17 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
     columns = [
         "№", 
         "Код по ЕНС ТРУ", 
-        "Наименование закупаемых товаров услуг работ (рус)", 
-        "Наименование закупаемых товаров услуг работ (каз)", 
-        "Краткая характеристика (рус)",
-        "Краткая характеристика (каз)",
-        "Дополнительная характеристика (рус)",
-        "Дополнительная характеристика (каз)",
+        "Наименование закупаемых товаров услуг работ", 
+        "Краткая характеристика",
+        "Дополнительная характеристика",
         "Единица измерения(МКЕИ)",
-        "Колво объём",
-        "цена за единицу тенге",
-        "сумма планируемая для закупок ТРУ",
-        "Место закупки", 
-        "Место поставки",
+        "Количество, объём",
+        "Цена за единицу тенге(без НДС)",
+        "Сумма планируемая для закупок ТРУ",
+        "Место закупки(КАТО)",
+        "Место поставки(КАТО)",
         "Статья затрат",
-        "источник финансирования",
+        "Источник финансирования",
         "КОД АГСК для смр",
         "КТП",
         "ВЦ %",
@@ -453,15 +455,16 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
         ws.row_dimensions[row_idx].height = 45
         return row_idx + 1
 
-    def fill_section(title, items, start_row):
+    def fill_section(title, items, start_row, is_first_section=False):
         if not items: return start_row
         
-        ws.merge_cells(f'A{start_row}:S{start_row}')
+        if is_first_section:
+            start_row = create_table_header(ws, start_row, columns)
+        
+        ws.merge_cells(f'A{start_row}:Q{start_row}')
         ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
         ws.cell(row=start_row, column=1).fill = sub_header_fill
         start_row += 1
-        
-        start_row = create_table_header(ws, start_row, columns)
         
         section_total = Decimal('0.00')
         section_vc_amount = Decimal('0.00')
@@ -481,11 +484,8 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
                 format_item_number(idx, item), # Передаем порядковый номер
                 item.trucode,
                 item.enstru.name_rus if item.enstru else "",
-                item.enstru.name_kaz if item.enstru else "",
                 item.enstru.detail_rus if item.enstru else "",
-                item.enstru.detail_kaz if item.enstru else "",
                 item.additional_specs,
-                item.additional_specs_kz,
                 item.unit.name_ru if item.unit else "",
                 item.quantity,
                 item.price_per_unit,
@@ -506,37 +506,37 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
             for col_idx, val in enumerate(row_data, 1):
                 cell = ws.cell(row=start_row, column=col_idx, value=val)
                 cell.border = border
-                if col_idx in [10, 11, 12, 20]: # Числовые поля
+                if col_idx in [7, 8, 9, 17]: # Числовые поля
                     cell.number_format = '#,##0.00'
             
             start_row += 1
             
         # Итого по разделу
-        ws.merge_cells(f'A{start_row}:K{start_row}')
+        ws.merge_cells(f'A{start_row}:H{start_row}')
         ws.cell(row=start_row, column=1, value=f"Итого по {title.lower()}:").font = Font(bold=True)
         ws.cell(row=start_row, column=1).alignment = Alignment(horizontal='right')
-        ws.cell(row=start_row, column=12, value=section_total).font = Font(bold=True)
-        ws.cell(row=start_row, column=12).number_format = '#,##0.00'
+        ws.cell(row=start_row, column=9, value=section_total).font = Font(bold=True)
+        ws.cell(row=start_row, column=9).number_format = '#,##0.00'
         
         # Добавляем итоги по ВЦ для раздела (взвешенное среднее)
         section_vc_mean = (section_vc_amount / section_total * 100) if section_total > 0 else Decimal('0.00')
         
-        ws.cell(row=start_row, column=19, value=f"Ср. {section_vc_mean.quantize(Decimal('0.00'))}%").font = Font(bold=True)
-        ws.cell(row=start_row, column=20, value=section_vc_amount).font = Font(bold=True)
-        ws.cell(row=start_row, column=20).number_format = '#,##0.00'
+        ws.cell(row=start_row, column=16, value=f"{section_vc_mean.quantize(Decimal('0.00'))}%").font = Font(bold=True)
+        ws.cell(row=start_row, column=17, value=section_vc_amount).font = Font(bold=True)
+        ws.cell(row=start_row, column=17).number_format = '#,##0.00'
         
         return start_row + 2
 
-    current_row = fill_section("1. Товары", grouped_items[models.NeedType.GOODS], current_row)
+    current_row = fill_section("1. Товары", grouped_items[models.NeedType.GOODS], current_row, is_first_section=True)
     current_row = fill_section("2. Работы", grouped_items[models.NeedType.WORKS], current_row)
     current_row = fill_section("3. Услуги", grouped_items[models.NeedType.SERVICES], current_row)
 
     # Всего
-    ws.merge_cells(f'A{current_row}:K{current_row}')
+    ws.merge_cells(f'A{current_row}:H{current_row}')
     ws.cell(row=current_row, column=1, value="Всего:").font = Font(bold=True, size=12)
     ws.cell(row=current_row, column=1).alignment = Alignment(horizontal='right')
-    ws.cell(row=current_row, column=12, value=version_with_items.total_amount).font = Font(bold=True, size=12)
-    ws.cell(row=current_row, column=12).number_format = '#,##0.00'
+    ws.cell(row=current_row, column=9, value=version_with_items.total_amount).font = Font(bold=True, size=12)
+    ws.cell(row=current_row, column=9).number_format = '#,##0.00'
     
     # Расчет общего взвешенного среднего процента ВЦ
     total_vc_mean = (version_with_items.vc_amount / version_with_items.total_amount * 100) if version_with_items.total_amount > 0 else Decimal('0.00')
@@ -544,6 +544,10 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
     current_row += 1
     ws.cell(row=current_row, column=9, value="Средний % ВЦ:").font = Font(bold=True)
     ws.cell(row=current_row, column=10, value=f"{total_vc_mean.quantize(Decimal('0.00'))}%").font = Font(bold=True)
+    
+    current_row += 1
+    # ws.cell(row=current_row, column=9, value="Медианный % ВЦ:").font = Font(bold=True) # УДАЛЕНО
+    # ws.cell(row=current_row, column=10, value=f"{version_with_items.vc_median}%").font = Font(bold=True) # УДАЛЕНО
     
     current_row += 1
     ws.cell(row=current_row, column=9, value="Общая сумма ВЦ:").font = Font(bold=True)
@@ -572,17 +576,16 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
         "Код по ЕНС ТРУ", 
         "Наименование закупаемых товаров услуг работ", 
         "Краткая характеристика",
-        "Дополнительная характеристика (рус)",
-        "Дополнительная характеристика (каз)",
+        "Дополнительная характеристика",
         "Единица измерения(МКЕИ)",
-        "Колво объём",
-        "цена за единицу тенге",
-        "сумма планируемая для закупок ТРУ",
-        "Место закупки", 
-        "Место поставки",
+        "Количество, объём",
+        "Цена за единицу тенге(без НДС)",
+        "Сумма планируемая для закупок ТРУ",
+        "Место закупки(КАТО)",
+        "Место поставки(КАТО)",
         "Статья затрат",
-        "источник финансирования",
-        "КОД АГСК для смр",
+        "Источник финансирования",
+        "Код АГСК-3 для СМР",
         "КТП",
         "Сумма ВЦ тенге без НДС",
         "БИН производителя",
@@ -623,7 +626,6 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
                         item.enstru.name_rus if item.enstru else "",
                         item.enstru.detail_rus if item.enstru else "",
                         item.additional_specs,
-                        item.additional_specs_kz,
                         item.unit.name_ru if item.unit else "",
                         item.quantity,
                         item.price_per_unit,
@@ -646,7 +648,7 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
                     for col_idx, val in enumerate(row_data, 1):
                         cell = ws_ktp.cell(row=ktp_row, column=col_idx, value=val)
                         cell.border = border
-                        if col_idx in [8, 9, 10, 17, 22]:
+                        if col_idx in [7, 8, 9, 16, 21]:
                             cell.number_format = '#,##0.00'
                     
                     ktp_row += 1
@@ -663,6 +665,85 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
                 pass
         adjusted_width = (max_length + 2)
         ws_ktp.column_dimensions[column_letter].width = min(adjusted_width, 50)
+
+    # --- Лист 3: Не резидентство ---
+    ws_nr = wb.create_sheet("Услуги, Работы ВЦ меньше 100%")
+    
+    nr_columns = [
+        "№", 
+        "Код по ЕНС ТРУ", 
+        "Наименование закупаемых товаров услуг работ", 
+        "Краткая характеристика",
+        "Дополнительная характеристика",
+        "Единица измерения(МКЕИ)",
+        "Количество, объём",
+        "Цена за единицу тенге без НДС",
+        "Сумма планируемая для закупок ТРУ",
+        "Место закупки(КАТО)",
+        "Место поставки(КАТО)",
+        "Статья затрат",
+        "Источник финансирования",
+        "Код АГСК-3 для СМР",
+        "Доля внутристрановой ценности (%)",
+        "Обоснование если доля внутристрановой ценности меньше 100%"
+    ]
+    
+    nr_row = 1
+    nr_row = create_table_header(ws_nr, nr_row, nr_columns)
+    
+    for t in [models.NeedType.WORKS, models.NeedType.SERVICES]:
+        items = grouped_items[t]
+        for idx, item in enumerate(items, 1):
+            if item.resident_share < 100:
+                # Логика для АГСК (дублируем)
+                agsk_value = ""
+                if item.expense_item and item.expense_item.name_ru == "СМР":
+                    if item.agsk_id:
+                        agsk_value = item.agsk_id
+                    else:
+                        agsk_value = "Прайс-лист"
+                elif item.agsk_id:
+                    agsk_value = item.agsk_id
+
+                row_data = [
+                    format_item_number(idx, item),
+                    item.trucode,
+                    item.enstru.name_rus if item.enstru else "",
+                    item.enstru.detail_rus if item.enstru else "",
+                    item.additional_specs,
+                    item.unit.name_ru if item.unit else "",
+                    item.quantity,
+                    item.price_per_unit,
+                    item.total_amount,
+                    item.kato_purchase.name_ru if item.kato_purchase else "",
+                    item.kato_delivery.name_ru if item.kato_delivery else "",
+                    item.expense_item.name_ru if item.expense_item else "",
+                    item.funding_source.name_ru if item.funding_source else "",
+                    agsk_value,
+                    f"{item.resident_share}",
+                    item.non_resident_reason
+                ]
+                
+                for col_idx, val in enumerate(row_data, 1):
+                    cell = ws_nr.cell(row=nr_row, column=col_idx, value=val)
+                    cell.border = border
+                    if col_idx in [7, 8, 9]:
+                        cell.number_format = '#,##0.00'
+                
+                nr_row += 1
+
+    # Автоширина для Не резидентство
+    for i, col in enumerate(ws_nr.columns, 1):
+        max_length = 0
+        column_letter = get_column_letter(i)
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = (max_length + 2)
+        ws_nr.column_dimensions[column_letter].width = min(adjusted_width, 50)
 
     virtual_workbook = io.BytesIO()
     wb.save(virtual_workbook)

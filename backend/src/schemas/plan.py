@@ -18,6 +18,10 @@ class ProcurementPlanVersionBase(BaseModel):
     # vc_median удален
     vc_amount: Optional[Decimal] = Field(default=0)
     
+    # Поля для статистики исполнения
+    executed_vc_amount: Optional[Decimal] = Field(default=0)
+    executed_vc_percentage: Optional[Decimal] = Field(default=0)
+    
     is_active: bool
     is_executed: bool = False
 
@@ -104,6 +108,9 @@ class PlanItem(BaseModel):
     min_dvc_percent: Decimal = Field(default=0)
     vc_amount: Decimal = Field(default=0) # Добавлено поле
     
+    # Новое поле: исполненная сумма ВЦ
+    executed_vc_amount: Optional[Decimal] = Field(default=0)
+
     start_version_number: int
     
     additional_specs: Optional[str] = None

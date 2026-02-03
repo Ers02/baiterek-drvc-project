@@ -18,6 +18,47 @@ def check_ktp_by_enstru(enstru_code: str, db: Session = Depends(get_db)):
     exists = db.query(models.Reestr_KTP).filter(models.Reestr_KTP.enstru_code == enstru_code).first()
     return {"is_ktp": exists is not None}
 
+@router.get("/ktp-suppliers/{enstru_code}", response_model=List[lookup_schema.KtpSupplier])
+def get_ktp_suppliers(enstru_code: str, db: Session = Depends(get_db)):
+    """Получить список поставщиков КТП по коду ЕНС ТРУ."""
+    suppliers = db.query(models.Reestr_KTP).filter(models.Reestr_KTP.enstru_code == enstru_code).all()
+    return suppliers
+
+@router.get("/supplier-by-bin/{bin_iin}", response_model=List[lookup_schema.KtpSupplier])
+def get_supplier_by_bin(bin_iin: str, enstru_code: Optional[str] = None, db: Session = Depends(get_db)):
+    """
+    Ищет поставщика по БИН.
+    Возвращает список всех найденных сертификатов.
+    """
+    if enstru_code:
+        # 1. Ищем все точные совпадения
+        exact_matches = db.query(models.Reestr_KTP).filter(
+            models.Reestr_KTP.bin_iin == bin_iin,
+            models.Reestr_KTP.enstru_code == enstru_code
+        ).all()
+        
+        if exact_matches:
+            return exact_matches
+
+    # 2. Если точных нет или enstru_code не передан, ищем просто по БИН (чтобы узнать название)
+    any_match = db.query(models.Reestr_KTP).filter(models.Reestr_KTP.bin_iin == bin_iin).first()
+    
+    if any_match:
+        # Возвращаем один "виртуальный" объект с нулевым ВЦ и БЕЗ названия продукта
+        return [lookup_schema.KtpSupplier(
+            id=any_match.id,
+            bin_iin=any_match.bin_iin,
+            company_name=any_match.company_name,
+            enstru_code=enstru_code if enstru_code else any_match.enstru_code,
+            dvc_percent=0.0,
+            product_name=None, # Исправлено: не возвращаем чужой продукт
+            production_address=any_match.production_address,
+            email=any_match.email,
+            phone=any_match.phone
+        )]
+        
+    return []
+
 @router.get("/mkei", response_model=List[lookup_schema.Mkei])
 def get_mkei_list(q: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(models.Mkei)

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 # Схема для User (для отображения в других схемах)
@@ -97,6 +97,21 @@ class Enstru(BaseModel):
     @property
     def specs_kz(self):
         return self.detail_kaz
+
+    class Config:
+        from_attributes = True
+
+# Схема для поставщика КТП
+class KtpSupplier(BaseModel):
+    id: int
+    bin_iin: str
+    company_name: str
+    dvc_percent: Optional[float] = None
+    product_name: Optional[str] = None
+    production_address: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    enstru_code: Optional[str] = None
 
     class Config:
         from_attributes = True

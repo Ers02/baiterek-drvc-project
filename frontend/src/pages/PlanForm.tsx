@@ -6,14 +6,16 @@ import {
   Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle,
   Chip, Stack, Container, Tooltip, TextField, Checkbox, FormControlLabel,
   Select, MenuItem, FormControl, InputLabel, OutlinedInput, ListItemText, Grid,
-  TablePagination
+  TablePagination, Divider, LinearProgress
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
 import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
   LockOpen as LockOpenIcon, CheckCircle as CheckCircleIcon, Download as DownloadIcon,
   Undo as UndoIcon, Assignment as AssignmentIcon, FileCopy as FileCopyIcon,
-  RadioButtonUnchecked as RadioButtonUncheckedIcon, Upload as UploadIcon
+  RadioButtonUnchecked as RadioButtonUncheckedIcon, Upload as UploadIcon,
+  ShoppingCart as GoodsIcon, Build as WorksIcon, DesignServices as ServicesIcon,
+  Functions as TotalIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n/index.tsx';
 import Header from '../components/Header';
@@ -26,53 +28,165 @@ import {
 import type { ProcurementPlan, ProcurementPlanVersion, PlanItemVersion } from '../services/api';
 
 // ОПТИМИЗАЦИЯ: Создаем форматтер один раз вне компонента
-const currencyFormatter = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT' });
+const currencyFormatter = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 });
 const formatCurrency = (amount: number) => currencyFormatter.format(amount);
 
-// Card for displaying statistics
-const StatsCard = ({ title, value, subValue, color = 'text.primary' }: { title: string; value: React.ReactNode; subValue?: React.ReactNode; color?: string; }) => (
-  <Paper elevation={1} sx={{ p: 3, textAlign: 'center', height: '100%' }}>
-    <Typography variant="h5" sx={{ color, fontWeight: 'bold', mb: 1 }}>{value}</Typography>
-    {subValue && <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>{subValue}</Typography>}
-    <Typography variant="body2" color="text.secondary">{title}</Typography>
+// --- Новый компонент для карточки статистики ---
+const DetailedStatsCard = ({ 
+    title, 
+    data, 
+    color = 'primary.main',
+    showExecuted = false 
+}: { 
+    title: string; 
+    data: Array<{ 
+        label: string; 
+        amount: number; 
+        percentage?: number;
+        executedAmount?: number;
+        executedPercentage?: number;
+        icon?: React.ReactNode;
+    }>; 
+    color?: string;
+    showExecuted?: boolean;
+}) => (
+  <Paper elevation={2} sx={{ p: 2, height: '100%', borderRadius: 2 }}>
+    <Typography variant="h6" sx={{ color, fontWeight: 'bold', mb: 2, textAlign: 'center', textTransform: 'uppercase', fontSize: '0.9rem', letterSpacing: 1 }}>{title}</Typography>
+    <Stack spacing={2}>
+      {data.map((item, index) => (
+        <Box key={index}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                {item.icon && <Box sx={{ mr: 1, color: 'text.secondary', display: 'flex' }}>{item.icon}</Box>}
+                <Typography variant="body2" fontWeight="bold" color="text.primary" sx={{ flexGrow: 1 }}>
+                    {item.label}
+                </Typography>
+                <Typography variant="body2" fontWeight="bold">
+                    {formatCurrency(item.amount)}
+                </Typography>
+            </Box>
+            
+            {item.percentage !== undefined && (
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                    <Box sx={{ flexGrow: 1, mr: 1 }}>
+                        <LinearProgress 
+                            variant="determinate" 
+                            value={Math.min(item.percentage, 100)} 
+                            sx={{ height: 6, borderRadius: 3, bgcolor: 'action.hover', '& .MuiLinearProgress-bar': { bgcolor: color } }} 
+                        />
+                    </Box>
+                    <Typography variant="caption" fontWeight="bold" sx={{ color }}>
+                        {item.percentage.toFixed(1)}%
+                    </Typography>
+                </Box>
+            )}
+
+            {showExecuted && (
+                <Box sx={{ mt: 0.5, pl: item.icon ? 4 : 0, borderLeft: `2px solid ${color}`, pl: 1, ml: 0.5 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="caption" color="text.secondary">Факт:</Typography>
+                        <Typography variant="caption" fontWeight="bold" color="success.main">
+                            {formatCurrency(item.executedAmount || 0)}
+                        </Typography>
+                    </Box>
+                    {item.executedPercentage !== undefined && (
+                         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <Typography variant="caption" color="text.secondary">% Факт:</Typography>
+                            <Typography variant="caption" fontWeight="bold" color="success.main">
+                                {item.executedPercentage.toFixed(1)}%
+                            </Typography>
+                        </Box>
+                    )}
+                </Box>
+            )}
+            {index < data.length - 1 && <Divider sx={{ mt: 1.5 }} />}
+        </Box>
+      ))}
+    </Stack>
   </Paper>
 );
 
-// Section for displaying plan statistics
+// --- Новый компонент секции статистики ---
 const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) => {
   const { t } = useTranslation();
-  
-  if (!version) {
-    return null;
-  }
 
-  const totalAmount = Number(version.total_amount ?? 0);
-  const vcAmount = Number(version.vc_amount ?? 0);
-  const vcPercentage = Number(version.vc_percentage ?? 0);
+  const stats = useMemo(() => {
+    const result = {
+      goods: { total: 0, vc: 0, executedTotal: 0, executedVc: 0 },
+      works: { total: 0, vc: 0, executedTotal: 0, executedVc: 0 },
+      services: { total: 0, vc: 0, executedTotal: 0, executedVc: 0 },
+    };
+
+    if (!version?.items) return null;
+
+    for (const item of version.items) {
+      if (item.is_deleted) continue;
+      const total = Number(item.total_amount || 0);
+      const vc = Number(item.vc_amount || 0);
+      const executedTotal = Number(item.executed_amount || 0);
+      const executedVc = Number(item.executed_vc_amount || 0);
+
+      if (item.need_type === 'Товар') {
+        result.goods.total += total;
+        result.goods.vc += vc;
+        result.goods.executedTotal += executedTotal;
+        result.goods.executedVc += executedVc;
+      } else if (item.need_type === 'Работа') {
+        result.works.total += total;
+        result.works.vc += vc;
+        result.works.executedTotal += executedTotal;
+        result.works.executedVc += executedVc;
+      } else if (item.need_type === 'Услуга') {
+        result.services.total += total;
+        result.services.vc += vc;
+        result.services.executedTotal += executedTotal;
+        result.services.executedVc += executedVc;
+      }
+    }
+
+    const overallTotal = result.goods.total + result.works.total + result.services.total;
+    const overallVc = result.goods.vc + result.works.vc + result.services.vc;
+    const overallExecutedTotal = result.goods.executedTotal + result.works.executedTotal + result.services.executedTotal;
+    const overallExecutedVc = result.goods.executedVc + result.works.executedVc + result.services.executedVc;
+
+    const buildStatData = (getValue: (stats: { total: number, vc: number, executedTotal: number, executedVc: number }) => { amount: number, percentage?: number, executedAmount?: number, executedPercentage?: number }) => [
+      { label: t('need_type_goods'), icon: <GoodsIcon fontSize="small" />, ...getValue(result.goods) },
+      { label: t('need_type_works'), icon: <WorksIcon fontSize="small" />, ...getValue(result.works) },
+      { label: t('need_type_services'), icon: <ServicesIcon fontSize="small" />, ...getValue(result.services) },
+      { label: t('total_label') || 'В общем', icon: <TotalIcon fontSize="small" />, ...getValue({ total: overallTotal, vc: overallVc, executedTotal: overallExecutedTotal, executedVc: overallExecutedVc }) },
+    ];
+
+    const vcData = buildStatData(s => ({ 
+        amount: s.vc, 
+        percentage: s.total > 0 ? (s.vc / s.total) * 100 : 0,
+        executedAmount: s.executedVc,
+        executedPercentage: s.executedTotal > 0 ? (s.executedVc / s.executedTotal) * 100 : 0
+    }));
+    
+    const importData = buildStatData(s => ({ 
+        amount: s.total - s.vc, 
+        percentage: s.total > 0 ? ((s.total - s.vc) / s.total) * 100 : 0,
+        executedAmount: s.executedTotal - s.executedVc,
+        executedPercentage: s.executedTotal > 0 ? ((s.executedTotal - s.executedVc) / s.executedTotal) * 100 : 0
+    }));
+    
+    const totalData = buildStatData(s => ({ 
+        amount: s.total,
+        executedAmount: s.executedTotal
+    }));
+
+    return { vcData, importData, totalData };
+  }, [version, t]);
+
+  if (!stats) return null;
   
-  const importAmount = totalAmount > 0 ? totalAmount - vcAmount : 0;
-  const importPercentage = totalAmount > 0 ? (importAmount / totalAmount) * 100 : 0;
+  const isApproved = version?.status === PlanStatus.APPROVED;
 
   return (
     <Box sx={{ mt: 4, mb: 2 }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-            <StatsCard 
-                title={t('vc_mean_percent')} 
-                value={`${vcPercentage.toFixed(2)}%`} 
-                subValue={formatCurrency(vcAmount)}
-                color="success.main" 
-            />
-            <StatsCard 
-                title={t('import_share')} 
-                value={`${importPercentage.toFixed(2)}%`} 
-                subValue={formatCurrency(importAmount)}
-                color="error.main" 
-            />
-            <StatsCard 
-                title={t('total_amount')} 
-                value={formatCurrency(totalAmount)} 
-                color="info.main" 
-            />
+            <DetailedStatsCard title={t('vc_mean_percent')} data={stats.vcData} color="#2e7d32" showExecuted={isApproved} />
+            <DetailedStatsCard title={t('import_share')} data={stats.importData} color="#d32f2f" showExecuted={isApproved} />
+            <DetailedStatsCard title={t('total_amount')} data={stats.totalData} color="#0288d1" showExecuted={isApproved} />
         </Box>
     </Box>
   );
@@ -269,6 +383,8 @@ export default function PlanForm() {
   const [selectedItemQuantity, setSelectedItemQuantity] = useState(0);
   const [selectedItemAmount, setSelectedItemAmount] = useState(0);
   const [selectedItemPrice, setSelectedItemPrice] = useState(0);
+  const [selectedItemTrucode, setSelectedItemTrucode] = useState(''); // Added trucode state
+  const [selectedItemNeedType, setSelectedItemNeedType] = useState(''); // Added need_type state
 
   // State for Import Modal
   const [isImportModalOpen, setImportModalOpen] = useState(false);
@@ -382,6 +498,8 @@ export default function PlanForm() {
     setSelectedItemQuantity(Number(item.quantity));
     setSelectedItemAmount(Number(item.total_amount));
     setSelectedItemPrice(Number(item.price_per_unit));
+    setSelectedItemTrucode(item.trucode); // Set trucode
+    setSelectedItemNeedType(item.need_type); // Set need_type
     setExecutionModalOpen(true);
   }, []);
 
@@ -426,7 +544,7 @@ export default function PlanForm() {
 
       const searchAgskLower = searchAgsk.toLowerCase();
       const matchesAgsk = !searchAgsk || 
-        (item.agsk_id?.toLowerCase().includes(searchAgskLower));
+        (item.agsk?.code?.toLowerCase().includes(searchAgskLower));
 
       const searchSpecsLower = searchSpecs.toLowerCase();
       const matchesSpecs = !searchSpecs || 
@@ -700,6 +818,8 @@ export default function PlanForm() {
           planQuantity={selectedItemQuantity}
           planAmount={selectedItemAmount}
           planPricePerUnit={selectedItemPrice}
+          trucode={selectedItemTrucode}
+          needType={selectedItemNeedType}
         />
       )}
 

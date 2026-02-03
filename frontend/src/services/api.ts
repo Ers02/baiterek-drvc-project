@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { 
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
     NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
-    Execution, ExecutionPayload
+    Execution, ExecutionPayload, KtpSupplier
 } from './api.types';
 import { PlanStatus } from './api.types';
 
@@ -46,6 +46,8 @@ export const getCostItems = (q?: string): Promise<CostItem[]> => api.get('/looku
 export const getSourceFunding = (q?: string): Promise<SourceFunding[]> => api.get('/lookups/source-funding', { params: { q } }).then(res => res.data);
 export const getEnstru = (q?: string): Promise<Enstru[]> => api.get('/lookups/enstru', { params: { q } }).then(res => res.data);
 export const checkKtp = (enstruCode: string): Promise<{ is_ktp: boolean }> => api.get(`/lookups/check-ktp/${enstruCode}`).then(res => res.data);
+export const getKtpSuppliers = (enstruCode: string): Promise<KtpSupplier[]> => api.get(`/lookups/ktp-suppliers/${enstruCode}`).then(res => res.data);
+export const getSupplierByBin = (bin: string, enstruCode?: string): Promise<KtpSupplier[]> => api.get(`/lookups/supplier-by-bin/${bin}`, { params: { enstru_code: enstruCode } }).then(res => res.data);
 
 
 // --- API для Планов (ProcurementPlan) ---
@@ -134,5 +136,5 @@ export { PlanStatus };
 export type { 
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
     NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
-    Execution, ExecutionPayload
+    Execution, ExecutionPayload, KtpSupplier
 };

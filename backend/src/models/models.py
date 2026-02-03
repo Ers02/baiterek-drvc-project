@@ -67,6 +67,10 @@ class ProcurementPlanVersion(Base):
     vc_percentage = Column(Numeric(5, 2), default=0) # Взвешенный процент ВЦ
     # vc_median удален
     vc_amount = Column(Numeric(20, 2), default=0) # Количественное (сумма)
+    
+    # Поля для статистики исполнения
+    executed_vc_amount = Column(Numeric(20, 2), default=0)
+    executed_vc_percentage = Column(Numeric(5, 2), default=0)
 
     is_active = Column(Boolean, default=True)
     is_executed = Column(Boolean, default=False, nullable=False)
@@ -136,6 +140,9 @@ class PlanItemVersion(Base):
     min_dvc_percent = Column(Numeric(5, 2), default=0)
     vc_amount = Column(Numeric(18, 2), default=0) # Новое поле: сумма ВЦ по позиции
     
+    # Новое поле: исполненная сумма ВЦ
+    executed_vc_amount = Column(Numeric(18, 2), default=0)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     version = relationship("ProcurementPlanVersion", back_populates="items", foreign_keys=[version_id])
@@ -174,8 +181,7 @@ class PlanItemExecution(Base):
     
     supplier_name = Column(String(500), nullable=False)
     supplier_bin = Column(String(12), nullable=False)
-    residency_code = Column(String(50), nullable=False)
-    origin_code = Column(String(50), nullable=False)
+    # residency_code и origin_code удалены
     
     contract_number = Column(String(100), nullable=False)
     contract_date = Column(Date, nullable=False)
@@ -183,6 +189,9 @@ class PlanItemExecution(Base):
     contract_quantity = Column(Numeric(12, 3), nullable=False)
     contract_price_per_unit = Column(Numeric(18, 2), nullable=False)
     contract_sum = Column(Numeric(18, 2), nullable=False)
+    
+    fact_vc_percentage = Column(Numeric(5, 2), default=0) # Фактический процент ВЦ
+    fact_vc_amount = Column(Numeric(18, 2), default=0) # Фактическая сумма ВЦ
     
     supply_volume_physical = Column(Numeric(12, 3), nullable=False)
     supply_volume_value = Column(Numeric(18, 2), nullable=False)

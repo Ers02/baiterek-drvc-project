@@ -3,6 +3,7 @@ from sqlalchemy import func
 from fastapi import HTTPException, status
 from ..models import models
 from ..schemas import execution_schema
+from . import plan_service
 
 def _recalculate_item_execution_status(db: Session, item_id: int):
     """
@@ -12,16 +13,23 @@ def _recalculate_item_execution_status(db: Session, item_id: int):
     if not item:
         return
 
-    contracted_quantity = db.query(func.sum(models.PlanItemExecution.contract_quantity)).filter(
+    # ИЗМЕНЕНО: Считаем исполнение по supply_volume_physical (фактическая поставка)
+    contracted_quantity = db.query(func.sum(models.PlanItemExecution.supply_volume_physical)).filter(
         models.PlanItemExecution.plan_item_id == item_id
     ).scalar() or 0
     
-    contracted_amount = db.query(func.sum(models.PlanItemExecution.contract_sum)).filter(
+    # ИЗМЕНЕНО: Считаем исполнение по supply_volume_value (фактическая сумма поставки)
+    contracted_amount = db.query(func.sum(models.PlanItemExecution.supply_volume_value)).filter(
+        models.PlanItemExecution.plan_item_id == item_id
+    ).scalar() or 0
+
+    executed_vc_amount = db.query(func.sum(models.PlanItemExecution.fact_vc_amount)).filter(
         models.PlanItemExecution.plan_item_id == item_id
     ).scalar() or 0
     
     item.executed_quantity = contracted_quantity
     item.executed_amount = contracted_amount
+    item.executed_vc_amount = executed_vc_amount
     db.commit()
 
 def _check_and_update_plan_execution_status(db: Session, version_id: int):
@@ -75,7 +83,8 @@ def create_execution(db: Session, execution_in: execution_schema.ExecutionCreate
             detail=f"Цена за единицу ({execution_in.contract_price_per_unit}) превышает плановую ({plan_item.price_per_unit})"
         )
 
-    # --- ВАЛИДАЦИЯ КОЛИЧЕСТВА ---
+    # --- ВАЛИДАЦИЯ КОЛИЧЕСТВА (по договорам) ---
+    # Мы все еще проверяем, чтобы сумма договоров не превышала план, чтобы не законтрактовать лишнего.
     total_contracted_quantity = db.query(func.sum(models.PlanItemExecution.contract_quantity)).filter(
         models.PlanItemExecution.plan_item_id == execution_in.plan_item_id
     ).scalar() or 0
@@ -86,13 +95,16 @@ def create_execution(db: Session, execution_in: execution_schema.ExecutionCreate
         remaining_quantity = plan_item.quantity - total_contracted_quantity
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Превышено плановое количество. Осталось: {remaining_quantity}, вы пытаетесь добавить: {execution_in.contract_quantity}"
+            detail=f"Превышено плановое количество (по договорам). Осталось: {remaining_quantity}, вы пытаетесь добавить: {execution_in.contract_quantity}"
         )
     
     # Рассчитываем сумму текущего договора
     current_contract_sum = execution_in.contract_quantity * execution_in.contract_price_per_unit
 
-    # --- ВАЛИДАЦИЯ СУММЫ ---
+    # ИЗМЕНЕНО: ВЦ считается от фактической суммы поставки
+    fact_vc_amount = execution_in.supply_volume_value * (execution_in.fact_vc_percentage / 100)
+
+    # --- ВАЛИДАЦИЯ СУММЫ (по договорам) ---
     total_contracted_sum = db.query(func.sum(models.PlanItemExecution.contract_sum)).filter(
         models.PlanItemExecution.plan_item_id == execution_in.plan_item_id
     ).scalar() or 0
@@ -104,13 +116,14 @@ def create_execution(db: Session, execution_in: execution_schema.ExecutionCreate
         if new_total_sum - plan_item.total_amount > 0.01:
              raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Превышена плановая сумма. Осталось: {remaining_sum}, вы пытаетесь добавить: {current_contract_sum}"
+                detail=f"Превышена плановая сумма (по договорам). Осталось: {remaining_sum}, вы пытаетесь добавить: {current_contract_sum}"
             )
     # --- КОНЕЦ ВАЛИДАЦИИ ---
 
     db_execution = models.PlanItemExecution(
-        **execution_in.model_dump(),
-        contract_sum=current_contract_sum
+        **execution_in.model_dump(exclude={'fact_vc_amount'}),
+        contract_sum=current_contract_sum,
+        fact_vc_amount=fact_vc_amount
     )
     db.add(db_execution)
     db.commit()
@@ -121,7 +134,10 @@ def create_execution(db: Session, execution_in: execution_schema.ExecutionCreate
     
     # Обновляем статус исполнения плана
     _check_and_update_plan_execution_status(db, plan_item.version_id)
-    
+
+    # Пересчитываем метрики версии (включая executed_vc_amount)
+    plan_service._recalculate_version_metrics(db, plan_item.version_id)
+
     return db_execution
 
 def get_executions_by_item(db: Session, plan_item_id: int, user: models.User) -> list[models.PlanItemExecution]:
@@ -153,5 +169,8 @@ def delete_execution(db: Session, execution_id: int, user: models.User):
     
     # Обновляем статус исполнения плана
     _check_and_update_plan_execution_status(db, version_id)
-    
+
+    # Пересчитываем метрики версии (включая executed_vc_amount)
+    plan_service._recalculate_version_metrics(db, version_id)
+
     return True

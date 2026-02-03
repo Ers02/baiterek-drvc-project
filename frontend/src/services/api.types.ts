@@ -84,7 +84,11 @@ export interface ProcurementPlanVersion {
   // Новые поля для ВЦ
   vc_percentage: number;
   vc_amount: number;
-  
+
+  // Поля для статистики исполнения
+  executed_vc_amount: number;
+  executed_vc_percentage: number;
+
   is_active: boolean;
   is_executed: boolean;
   created_at: string;
@@ -127,13 +131,13 @@ export interface Execution {
   plan_item_id: number;
   supplier_name: string;
   supplier_bin: string;
-  residency_code: string;
-  origin_code: string;
+  // residency_code и origin_code удалены
   contract_number: string;
   contract_date: string;
   contract_quantity: number;
   contract_price_per_unit: number;
   contract_sum: number;
+  fact_vc_percentage: number; // Фактический процент ВЦ
   supply_volume_physical: number;
   supply_volume_value: number;
 }
@@ -142,12 +146,24 @@ export interface ExecutionPayload {
   plan_item_id: number;
   supplier_name: string;
   supplier_bin: string;
-  residency_code: string;
-  origin_code: string;
+  // residency_code и origin_code удалены
   contract_number: string;
   contract_date: string;
   contract_quantity: number;
   contract_price_per_unit: number;
+  fact_vc_percentage: number; // Фактический процент ВЦ
   supply_volume_physical: number;
   supply_volume_value: number;
+}
+
+export interface KtpSupplier {
+  id: number;
+  bin_iin: string;
+  company_name: string;
+  dvc_percent?: number;
+  product_name?: string;
+  production_address?: string;
+  email?: string;
+  phone?: string;
+  enstru_code?: string;
 }

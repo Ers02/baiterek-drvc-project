@@ -196,9 +196,9 @@ export default function PlanItemForm() {
       quantity: Number(formData.quantity) || 0,
       price_per_unit: Number(formData.price_per_unit) || 0,
       is_ktp: isGoods ? (formData.is_ktp || false) : Number(formData.resident_share) === 100,
-      resident_share: isGoods ? 100 : Number(formData.resident_share),
+      resident_share: isGoods ? 0 : Number(formData.resident_share),
       non_resident_reason: isGoods ? null : (Number(formData.resident_share) < 100 ? formData.non_resident_reason : null),
-      min_dvc_percent: isGoods ? 100 : Number(formData.resident_share),
+      min_dvc_percent: isGoods ? 0 : Number(formData.resident_share),
     };
 
     try {

@@ -76,9 +76,9 @@ def generate_import_template(db: Session) -> bytes:
         "Место поставки (КАТО)",                  # K
         "Статья затрат",                          # L
         "Источник финансирования",                # M
-        "Код АГСК (для СМР)",                     # N
-        "Доля местного содержания (%)",           # O
-        "Обоснование нерезидентства"              # P
+        "Код АГСК (для СМР)\nИз справочника АГСК-3",                     # N
+        "Доля внутристрановой ценности (%)",           # O
+        "Обоснование если доля внутристрановой ценности ниже 100%"              # P
     ]
     
     # Стилизация заголовков
@@ -110,8 +110,8 @@ def generate_import_template(db: Session) -> bytes:
     ws_data.column_dimensions['K'].width = 21
     ws_data.column_dimensions['L'].width = 21
     ws_data.column_dimensions['M'].width = 21
-    ws_data.column_dimensions['N'].width = 20
-    ws_data.column_dimensions['O'].width = 15
+    ws_data.column_dimensions['N'].width = 22
+    ws_data.column_dimensions['O'].width = 17
     ws_data.column_dimensions['P'].width = 30
 
     # --- Настройка Data Validation ---
@@ -299,6 +299,10 @@ def process_import_file(db: Session, plan_id: int, file: UploadFile, user: model
         if price < 0:
              errors.append({"row": row_idx, "message": "Цена не может быть отрицательной"})
              continue
+             
+        # Для работ и услуг количество всегда 1
+        if need_type != models.NeedType.GOODS:
+            quantity = Decimal(1)
 
         kato_p_code = extract_code(row_data[9])
         kato_d_code = extract_code(row_data[10])
@@ -360,8 +364,8 @@ def process_import_file(db: Session, plan_id: int, file: UploadFile, user: model
         resident_share = Decimal(100)
         
         if need_type == models.NeedType.GOODS:
-            resident_share = Decimal(100)
-            non_resident_reason = None # Для товаров всегда 100% и нет обоснования
+            resident_share = Decimal(0) # Изменено с 100 на 0
+            non_resident_reason = None # Для товаров всегда 0% и нет обоснования
         else:
             if resident_share_val is not None:
                 try:
@@ -371,11 +375,11 @@ def process_import_file(db: Session, plan_id: int, file: UploadFile, user: model
                     continue
                 
                 if resident_share < 0 or resident_share > 100:
-                    errors.append({"row": row_idx, "message": "Доля местного содержания должна быть от 0 до 100"})
+                    errors.append({"row": row_idx, "message": "Доля внутристрановой ценности должна быть от 0 до 100"})
                     continue
                 
                 if resident_share < 100 and not non_resident_reason:
-                    errors.append({"row": row_idx, "message": "Обоснование нерезидентства обязательно, если доля < 100%"})
+                    errors.append({"row": row_idx, "message": "Обоснование обязательно, если доля < 100%"})
                     continue
             else:
                 resident_share = Decimal(100) # По умолчанию 100
