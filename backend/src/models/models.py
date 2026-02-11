@@ -24,6 +24,8 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     iin = Column(String(12), unique=True, nullable=False, index=True)
     full_name = Column(String(255), nullable=False)
+    # Добавлено поле пароля
+    hashed_password = Column(String(255), nullable=True)
     bin = Column(String(12), index=True)
     org_name = Column(String(500))
     email = Column(String(255))
@@ -142,6 +144,9 @@ class PlanItemVersion(Base):
     
     # Новое поле: исполненная сумма ВЦ
     executed_vc_amount = Column(Numeric(18, 2), default=0)
+    
+    # Новое поле: оригинальное название единицы измерения (для импорта)
+    original_unit_name = Column(String(100), nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -279,9 +284,9 @@ class Reestr_KTP(Base):
     tnved_code_10 = Column(String(10), nullable=True)
     kpved_code = Column(String(20), nullable=True)
     kpved_name = Column(Text, nullable=True)
-    enstru_code = Column(String(50), nullable=True)
+    enstru_code = Column(String(50), nullable=True, index=True) # Добавлен индекс
     enstru_name = Column(Text, nullable=True)
-    agsk3_code = Column(String(50), nullable=True)
+    agsk3_code = Column(String(50), nullable=True, index=True) # Добавлен индекс
     agsk3_name = Column(Text, nullable=True)
     dvc_percent = Column(Float, nullable=True)
     localization_level = Column(String(20), nullable=True)

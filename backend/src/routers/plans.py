@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Union
@@ -6,6 +6,7 @@ import io
 from ..database.database import get_db
 from ..schemas import plan as plan_schema
 from ..services import plan_service, import_service
+from ..services.exporters import plan_exporter
 from ..utils.auth import get_current_user
 from ..models import models
 
@@ -142,13 +143,30 @@ def export_version_to_excel(
     if db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для экспорта")
 
-    excel_data = plan_service.export_plan_to_excel(db, plan_id, version_id)
+    excel_data = plan_exporter.export_plan_to_excel(db, plan_id, version_id)
 
     return StreamingResponse(
         io.BytesIO(excel_data),
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition': f'attachment; filename="plan_{plan_id}_v{version_id}.xlsx"'}
     )
+
+@router.get("/{plan_id}/compare", tags=["Versions"])
+def compare_plan_versions(
+    plan_id: int,
+    v1_id: int,
+    v2_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Сравнить две версии плана и получить список изменений.
+    """
+    db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
+    if db_plan.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Нет прав для просмотра этого плана")
+        
+    return plan_service.compare_versions(db, plan_id, v1_id, v2_id)
 
 # ========= Эндпоинты для Позиций (PlanItem) в контексте Плана =========
 
@@ -183,9 +201,29 @@ def download_import_template(db: Session = Depends(get_db)):
 @router.post("/{plan_id}/import", tags=["Import"])
 def import_items_from_file(
     plan_id: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """Импортировать позиции из Excel файла в активную версию плана."""
-    return import_service.process_import_file(db=db, plan_id=plan_id, file=file, user=current_user)
+    """
+    Импортировать позиции из Excel файла в активную версию плана.
+    Импорт выполняется в фоновом режиме.
+    """
+    return import_service.process_import_file(db=db, plan_id=plan_id, file=file, user=current_user, background_tasks=background_tasks)
+
+@router.post("/import-kenml-template", tags=["Import"])
+def import_kenml_and_generate_template(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Парсит KENML/ZIP файл, ищет соответствия и возвращает заполненный Excel-шаблон.
+    """
+    excel_data = import_service.process_kenml_import(db=db, file=file)
+    return StreamingResponse(
+        io.BytesIO(excel_data),
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': 'attachment; filename="filled_import_template.xlsx"'}
+    )

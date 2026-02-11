@@ -6,7 +6,7 @@ import {
   Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle,
   Chip, Stack, Container, Tooltip, TextField, Checkbox, FormControlLabel,
   Select, MenuItem, FormControl, InputLabel, OutlinedInput, ListItemText, Grid,
-  TablePagination, Divider, LinearProgress
+  TablePagination, Divider, LinearProgress, Tabs, Tab
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
 import {
@@ -15,7 +15,7 @@ import {
   Undo as UndoIcon, Assignment as AssignmentIcon, FileCopy as FileCopyIcon,
   RadioButtonUnchecked as RadioButtonUncheckedIcon, Upload as UploadIcon,
   ShoppingCart as GoodsIcon, Build as WorksIcon, DesignServices as ServicesIcon,
-  Functions as TotalIcon
+  Functions as TotalIcon, Description as DescriptionIcon, CompareArrows as CompareIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n/index.tsx';
 import Header from '../components/Header';
@@ -23,7 +23,7 @@ import ExecutionModal from '../components/ExecutionModal';
 import ImportModal from '../components/ImportModal';
 import {
   getPlanById, deleteItem, updateVersionStatus, exportVersionToExcel, revertItem, createVersion,
-  PlanStatus
+  PlanStatus, importKenmlTemplate, compareVersions
 } from '../services/api';
 import type { ProcurementPlan, ProcurementPlanVersion, PlanItemVersion } from '../services/api';
 
@@ -404,6 +404,12 @@ export default function PlanForm() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
 
+  // State for Compare Modal
+  const [isCompareModalOpen, setCompareModalOpen] = useState(false);
+  const [compareResult, setCompareResult] = useState<any>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareTab, setCompareTab] = useState(0); // 0: Changed, 1: Added, 2: Removed
+
   const loadPlan = useCallback(async () => {
     if (!planId) return;
     try {
@@ -457,6 +463,22 @@ export default function PlanForm() {
       } finally {
         setLoading(false);
       }
+    }
+  };
+  
+  const handleKenmlImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0) return;
+    
+    const file = event.target.files[0];
+    setLoading(true);
+    try {
+      await importKenmlTemplate(file);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || t('error_importing_kenml') || "Ошибка импорта KENML");
+    } finally {
+      setLoading(false);
+      // Сбрасываем value, чтобы можно было выбрать тот же файл снова
+      event.target.value = '';
     }
   };
 
@@ -523,6 +545,33 @@ export default function PlanForm() {
     setPage(0);
   };
 
+  const handleCompareVersions = async () => {
+    if (!plan || !activeVersion || plan.versions.length < 2) return;
+    
+    // Сравниваем текущую (активную) версию с предыдущей
+    const sortedVersions = [...plan.versions].sort((a, b) => a.version_number - b.version_number);
+    const currentIndex = sortedVersions.findIndex(v => v.id === activeVersion.id);
+    
+    if (currentIndex <= 0) {
+        alert("Нет предыдущей версии для сравнения");
+        return;
+    }
+    
+    const prevVersion = sortedVersions[currentIndex - 1];
+    
+    setCompareLoading(true);
+    setCompareModalOpen(true);
+    try {
+        const result = await compareVersions(Number(planId), prevVersion.id, activeVersion.id);
+        setCompareResult(result);
+    } catch (err) {
+        console.error(err);
+        setCompareResult(null);
+    } finally {
+        setCompareLoading(false);
+    }
+  };
+
   const isEditable = activeVersion?.status === PlanStatus.DRAFT;
   const isApproved = activeVersion?.status === PlanStatus.APPROVED;
 
@@ -575,6 +624,18 @@ export default function PlanForm() {
 
   const hasItems = filteredItems.length > 0;
 
+  // Функция для перевода названий полей
+  const getFieldLabel = (field: string) => {
+      switch (field) {
+          case 'quantity': return t('item_quantity') || 'Количество';
+          case 'price': return t('item_price') || 'Цена';
+          case 'total_amount': return t('total_amount') || 'Сумма';
+          case 'trucode': return t('enstru_code') || 'Код ЕНС ТРУ';
+          case 'additional_specs': return t('additional_specs') || 'Характеристика';
+          default: return field;
+      }
+  };
+
   if (loading) return <><Header /><Box sx={{ p: 4, display: 'flex', justifyContent: 'center' }}><CircularProgress /></Box></>;
   if (error) return <><Header /><Box sx={{ p: 4 }}><Alert severity="error">{error}</Alert></Box></>;
   if (!plan || !activeVersion) return <><Header /><Box sx={{ p: 4 }}><Alert severity="info">{t('no_plan_data')}</Alert></Box></>;
@@ -599,14 +660,39 @@ export default function PlanForm() {
             </Stack>
           </Box>
           <Stack direction="row" spacing={2}>
-            {isEditable && (
+            {plan.versions.length > 1 && (
                 <Button 
                     variant="outlined" 
-                    startIcon={<UploadIcon />} 
-                    onClick={() => setImportModalOpen(true)}
+                    color="info"
+                    startIcon={<CompareIcon />} 
+                    onClick={handleCompareVersions}
                 >
-                    {t('import_items')}
+                    Сравнить с пред. версией
                 </Button>
+            )}
+            {isEditable && (
+                <>
+                    <Button 
+                        variant="outlined" 
+                        startIcon={<UploadIcon />} 
+                        onClick={() => setImportModalOpen(true)}
+                    >
+                        {t('import_items')}
+                    </Button>
+                    <Button
+                        variant="outlined"
+                        component="label"
+                        startIcon={<DescriptionIcon />}
+                    >
+                        Загрузить смету (KENML)
+                        <input
+                            type="file"
+                            hidden
+                            accept=".kenml,.xml,.zip"
+                            onChange={handleKenmlImport}
+                        />
+                    </Button>
+                </>
             )}
             <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}>
               {t('export_to_excel')}
@@ -654,7 +740,7 @@ export default function PlanForm() {
             <Grid container spacing={2} alignItems="center">
                 <Grid item xs={12} sm={6} md={2}>
                     <TextField 
-                        label={t('enstru_code')}
+                        label={t('enstru_code') || 'Код ЕНС ТРУ'}
                         variant="outlined"
                         size="small"
                         fullWidth
@@ -664,7 +750,7 @@ export default function PlanForm() {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                     <TextField 
-                        label={t('item_name')}
+                        label={t('item_name') || 'Наименование'}
                         variant="outlined"
                         size="small"
                         fullWidth
@@ -674,7 +760,7 @@ export default function PlanForm() {
                 </Grid>
                 <Grid item xs={12} sm={6} md={2}>
                     <TextField 
-                        label={t('agsk_code')}
+                        label={t('agsk_code') || 'Код АГСК'}
                         variant="outlined"
                         size="small"
                         fullWidth
@@ -684,7 +770,7 @@ export default function PlanForm() {
                 </Grid>
                 <Grid item xs={12} sm={6} md={2}>
                     <TextField 
-                        label={t('specs_search_label')}
+                        label={t('specs_search_label') || 'Характеристика'}
                         variant="outlined"
                         size="small"
                         fullWidth
@@ -694,12 +780,12 @@ export default function PlanForm() {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                     <FormControl size="small" fullWidth sx={{ minWidth: 170 }}>
-                        <InputLabel>{t('need_type')}</InputLabel>
+                        <InputLabel>{t('need_type') || 'Тип закупки'}</InputLabel>
                         <Select
                         multiple
                         value={filterTypes}
                         onChange={handleFilterTypeChange}
-                        input={<OutlinedInput label={t('need_type')} />}
+                        input={<OutlinedInput label={t('need_type') || 'Тип закупки'} />}
                         renderValue={(selected) => selected.join(', ')}
                         >
                         {['Товар', 'Работа', 'Услуга'].map((type) => (
@@ -714,7 +800,7 @@ export default function PlanForm() {
                 <Grid item xs={12}>
                     <FormControlLabel
                         control={<Checkbox checked={showKtpOnly} onChange={(e) => { setShowKtpOnly(e.target.checked); setPage(0); }} />}
-                        label={t('show_ktp_only')}
+                        label={t('show_ktp_only') || 'Только КТП'}
                     />
                 </Grid>
             </Grid>
@@ -806,6 +892,126 @@ export default function PlanForm() {
         </DialogActions>
       </Dialog>
       
+      {/* Модальное окно сравнения версий */}
+      <Dialog open={isCompareModalOpen} onClose={() => setCompareModalOpen(false)} maxWidth="lg" fullWidth>
+        <DialogTitle>Сравнение версий</DialogTitle>
+        <DialogContent>
+            {compareLoading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>
+            ) : compareResult ? (
+                <Box>
+                    <Typography variant="subtitle1" gutterBottom>
+                        Сравнение версии {compareResult.version1} и {compareResult.version2}
+                    </Typography>
+                    
+                    <Tabs value={compareTab} onChange={(e, val) => setCompareTab(val)} sx={{ mb: 2 }}>
+                        <Tab label={`Изменено (${compareResult.changed_count})`} />
+                        <Tab label={`Добавлено (${compareResult.added_count})`} />
+                        <Tab label={`Удалено (${compareResult.removed_count})`} />
+                    </Tabs>
+
+                    {compareTab === 0 && (
+                        <TableContainer component={Paper} variant="outlined">
+                            <Table size="small">
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell>№</TableCell>
+                                        <TableCell>Код ЕНС ТРУ</TableCell>
+                                        <TableCell>Наименование</TableCell>
+                                        <TableCell>Изменения</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {compareResult.changed_items.length > 0 ? (
+                                        compareResult.changed_items.map((item: any) => (
+                                            <TableRow key={item.item_id}>
+                                                <TableCell>{item.item_number}</TableCell>
+                                                <TableCell>{item.trucode}</TableCell>
+                                                <TableCell>{item.name}</TableCell>
+                                                <TableCell>
+                                                    {item.changes.map((change: any, idx: number) => (
+                                                        <Typography key={idx} variant="body2" sx={{ fontSize: '0.8rem' }}>
+                                                            {getFieldLabel(change.field)}: {change.old} &rarr; <b>{change.new}</b>
+                                                        </Typography>
+                                                    ))}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow><TableCell colSpan={4} align="center">Нет изменений</TableCell></TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    )}
+
+                    {compareTab === 1 && (
+                        <TableContainer component={Paper} variant="outlined">
+                            <Table size="small">
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell>№</TableCell>
+                                        <TableCell>Код ЕНС ТРУ</TableCell>
+                                        <TableCell>Наименование</TableCell>
+                                        <TableCell align="right">Сумма</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {compareResult.added_items.length > 0 ? (
+                                        compareResult.added_items.map((item: any) => (
+                                            <TableRow key={item.id}>
+                                                <TableCell>{item.item_number}</TableCell>
+                                                <TableCell>{item.trucode}</TableCell>
+                                                <TableCell>{item.name}</TableCell>
+                                                <TableCell align="right">{formatCurrency(item.amount)}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow><TableCell colSpan={4} align="center">Нет добавленных позиций</TableCell></TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    )}
+
+                    {compareTab === 2 && (
+                        <TableContainer component={Paper} variant="outlined">
+                            <Table size="small">
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell>№</TableCell>
+                                        <TableCell>Код ЕНС ТРУ</TableCell>
+                                        <TableCell>Наименование</TableCell>
+                                        <TableCell align="right">Сумма</TableCell>
+                                    </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                    {compareResult.removed_items.length > 0 ? (
+                                        compareResult.removed_items.map((item: any) => (
+                                            <TableRow key={item.id}>
+                                                <TableCell>{item.item_number}</TableCell>
+                                                <TableCell>{item.trucode}</TableCell>
+                                                <TableCell>{item.name}</TableCell>
+                                                <TableCell align="right">{formatCurrency(item.amount)}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow><TableCell colSpan={4} align="center">Нет удаленных позиций</TableCell></TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </TableContainer>
+                    )}
+                </Box>
+            ) : (
+                <Typography>Нет данных для сравнения</Typography>
+            )}
+        </DialogContent>
+        <DialogActions>
+            <Button onClick={() => setCompareModalOpen(false)}>Закрыть</Button>
+        </DialogActions>
+      </Dialog>
+
       {selectedItemId && (
         <ExecutionModal 
           open={isExecutionModalOpen}

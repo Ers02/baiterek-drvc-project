@@ -75,6 +75,9 @@ export const exportVersionToExcel = async (planId: number, versionId: number): P
   link.remove();
 };
 
+export const compareVersions = (planId: number, v1Id: number, v2Id: number): Promise<any> => 
+    api.get(`/plans/${planId}/compare`, { params: { v1_id: v1Id, v2_id: v2Id } }).then(res => res.data);
+
 // --- API для Позиций Плана (PlanItem) ---
 export const getItemById = (itemId: number): Promise<PlanItemVersion> => api.get(`/items/${itemId}`).then(res => res.data);
 export const addItemToPlan = (planId: number, itemData: PlanItemPayload): Promise<PlanItemVersion> => api.post(`/plans/${planId}/items`, itemData).then(res => res.data);
@@ -127,6 +130,23 @@ export const importItems = (planId: number, file: File): Promise<any> => {
             // Если это файл (ошибки)
             return res.data;
         }
+    });
+};
+
+export const importKenmlTemplate = (file: File): Promise<void> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/plans/import-kenml-template', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        responseType: 'blob',
+    }).then(res => {
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'filled_import_template.xlsx');
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
     });
 };
 

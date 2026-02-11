@@ -83,40 +83,41 @@ def create_execution(db: Session, execution_in: execution_schema.ExecutionCreate
             detail=f"Цена за единицу ({execution_in.contract_price_per_unit}) превышает плановую ({plan_item.price_per_unit})"
         )
 
-    # --- ВАЛИДАЦИЯ КОЛИЧЕСТВА (по договорам) ---
-    # Мы все еще проверяем, чтобы сумма договоров не превышала план, чтобы не законтрактовать лишнего.
-    total_contracted_quantity = db.query(func.sum(models.PlanItemExecution.contract_quantity)).filter(
+    # --- ВАЛИДАЦИЯ КОЛИЧЕСТВА (по ФАКТУ ПОСТАВКИ) ---
+    # Изменено: проверяем supply_volume_physical вместо contract_quantity
+    total_executed_quantity = db.query(func.sum(models.PlanItemExecution.supply_volume_physical)).filter(
         models.PlanItemExecution.plan_item_id == execution_in.plan_item_id
     ).scalar() or 0
 
-    new_total_quantity = total_contracted_quantity + execution_in.contract_quantity
+    new_total_quantity = total_executed_quantity + execution_in.supply_volume_physical
 
     if new_total_quantity > plan_item.quantity:
-        remaining_quantity = plan_item.quantity - total_contracted_quantity
+        remaining_quantity = plan_item.quantity - total_executed_quantity
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Превышено плановое количество (по договорам). Осталось: {remaining_quantity}, вы пытаетесь добавить: {execution_in.contract_quantity}"
+            detail=f"Превышено плановое количество (по факту поставки). Осталось: {remaining_quantity}, вы пытаетесь добавить: {execution_in.supply_volume_physical}"
         )
     
     # Рассчитываем сумму текущего договора
     current_contract_sum = execution_in.contract_quantity * execution_in.contract_price_per_unit
 
-    # ИЗМЕНЕНО: ВЦ считается от фактической суммы поставки
+    # ВЦ считается от фактической суммы поставки
     fact_vc_amount = execution_in.supply_volume_value * (execution_in.fact_vc_percentage / 100)
 
-    # --- ВАЛИДАЦИЯ СУММЫ (по договорам) ---
-    total_contracted_sum = db.query(func.sum(models.PlanItemExecution.contract_sum)).filter(
+    # --- ВАЛИДАЦИЯ СУММЫ (по ФАКТУ ПОСТАВКИ) ---
+    # Изменено: проверяем supply_volume_value вместо contract_sum
+    total_executed_sum = db.query(func.sum(models.PlanItemExecution.supply_volume_value)).filter(
         models.PlanItemExecution.plan_item_id == execution_in.plan_item_id
     ).scalar() or 0
 
-    new_total_sum = total_contracted_sum + current_contract_sum
+    new_total_sum = total_executed_sum + execution_in.supply_volume_value
 
     if new_total_sum > plan_item.total_amount:
-        remaining_sum = plan_item.total_amount - total_contracted_sum
+        remaining_sum = plan_item.total_amount - total_executed_sum
         if new_total_sum - plan_item.total_amount > 0.01:
              raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Превышена плановая сумма (по договорам). Осталось: {remaining_sum}, вы пытаетесь добавить: {current_contract_sum}"
+                detail=f"Превышена плановая сумма (по факту поставки). Осталось: {remaining_sum}, вы пытаетесь добавить: {execution_in.supply_volume_value}"
             )
     # --- КОНЕЦ ВАЛИДАЦИИ ---
 

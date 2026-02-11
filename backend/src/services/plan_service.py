@@ -1,14 +1,10 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import func, desc, and_
+from sqlalchemy import func, desc, and_, update, case
 from decimal import Decimal
 from fastapi import HTTPException, status
-import io
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-import statistics
 from ..models import models
 from ..schemas import plan as plan_schema
+from ..utils.helpers import get_need_type_by_typename
 
 # ========= Вспомогательные функции для версий =========
 
@@ -23,46 +19,79 @@ def _get_active_version(db: Session, plan_id: int, lock: bool = False) -> models
     return query.first()
 
 def _recalculate_version_metrics(db: Session, version_id: int):
-    """Пересчитывает общую сумму и другие метрики для конкретной версии плана."""
+    """
+    Пересчитывает общую сумму и другие метрики для конкретной версии плана.
+    Оптимизировано: использует SQL для массового обновления и агрегации.
+    """
     version = db.query(models.ProcurementPlanVersion).filter(models.ProcurementPlanVersion.id == version_id).first()
     if not version:
         return
 
-    # Получаем все не удаленные позиции
-    items = db.query(models.PlanItemVersion).filter(
+    # 1. Массовое обновление min_dvc_percent и vc_amount для ТОВАРОВ
+    trucodes = [r[0] for r in db.query(models.PlanItemVersion.trucode).filter(
+        models.PlanItemVersion.version_id == version_id,
+        models.PlanItemVersion.need_type == models.NeedType.GOODS,
+        models.PlanItemVersion.is_deleted == False
+    ).distinct().all()]
+    
+    if trucodes:
+        ktp_map = {}
+        ktp_results = db.query(
+            models.Reestr_KTP.enstru_code,
+            func.min(models.Reestr_KTP.dvc_percent)
+        ).filter(
+            models.Reestr_KTP.enstru_code.in_(trucodes)
+        ).group_by(models.Reestr_KTP.enstru_code).all()
+        
+        for code, dvc in ktp_results:
+            ktp_map[code] = Decimal(str(dvc)) if dvc is not None else Decimal(0)
+            
+        for code, dvc in ktp_map.items():
+            db.query(models.PlanItemVersion).filter(
+                models.PlanItemVersion.version_id == version_id,
+                models.PlanItemVersion.trucode == code,
+                models.PlanItemVersion.need_type == models.NeedType.GOODS
+            ).update({
+                models.PlanItemVersion.min_dvc_percent: dvc,
+                models.PlanItemVersion.vc_amount: models.PlanItemVersion.total_amount * (dvc / 100)
+            }, synchronize_session=False)
+            
+        db.query(models.PlanItemVersion).filter(
+            models.PlanItemVersion.version_id == version_id,
+            models.PlanItemVersion.need_type == models.NeedType.GOODS,
+            models.PlanItemVersion.trucode.notin_(ktp_map.keys())
+        ).update({
+            models.PlanItemVersion.min_dvc_percent: 0,
+            models.PlanItemVersion.vc_amount: 0
+        }, synchronize_session=False)
+
+    # 2. Массовое обновление для РАБОТ и УСЛУГ (min_dvc = resident_share)
+    db.query(models.PlanItemVersion).filter(
+        models.PlanItemVersion.version_id == version_id,
+        models.PlanItemVersion.need_type != models.NeedType.GOODS,
+        models.PlanItemVersion.is_deleted == False
+    ).update({
+        models.PlanItemVersion.min_dvc_percent: models.PlanItemVersion.resident_share,
+        models.PlanItemVersion.vc_amount: models.PlanItemVersion.total_amount * (models.PlanItemVersion.resident_share / 100)
+    }, synchronize_session=False)
+
+    db.flush() # Применяем изменения перед агрегацией
+
+    # 3. Агрегация сумм через SQL
+    metrics = db.query(
+        func.sum(models.PlanItemVersion.total_amount),
+        func.sum(models.PlanItemVersion.vc_amount),
+        func.sum(models.PlanItemVersion.executed_amount),
+        func.sum(models.PlanItemVersion.executed_vc_amount)
+    ).filter(
         models.PlanItemVersion.version_id == version_id,
         models.PlanItemVersion.is_deleted == False
-    ).all()
+    ).first()
 
-    total_amount = Decimal('0.00')
-    vc_amount_total = Decimal('0.00')
-    
-    executed_amount_total = Decimal('0.00')
-    executed_vc_amount_total = Decimal('0.00')
-
-    for item in items:
-        total_amount += item.total_amount
-        
-        # Логика определения min_dvc_percent
-        if item.need_type == models.NeedType.GOODS:
-            min_dvc = db.query(func.min(models.Reestr_KTP.dvc_percent)).filter(
-                models.Reestr_KTP.enstru_code == item.trucode
-            ).scalar()
-            item_dvc_percent = Decimal(str(min_dvc)) if min_dvc is not None else Decimal('0.00')
-        else:
-            item_dvc_percent = item.resident_share if item.resident_share is not None else Decimal('0.00')
-
-        item.min_dvc_percent = item_dvc_percent
-        
-        item_vc_amount = item.total_amount * (item_dvc_percent / Decimal('100.00'))
-        item.vc_amount = item_vc_amount
-        
-        db.add(item) # Сохраняем обновленные данные по ВЦ самой позиции
-        
-        # Агрегируем уже рассчитанные данные по исполнению из самой позиции
-        vc_amount_total += item.vc_amount
-        executed_amount_total += item.executed_amount if item.executed_amount is not None else Decimal('0.00')
-        executed_vc_amount_total += item.executed_vc_amount if item.executed_vc_amount is not None else Decimal('0.00')
+    total_amount = metrics[0] or Decimal(0)
+    vc_amount_total = metrics[1] or Decimal(0)
+    executed_amount_total = metrics[2] or Decimal(0)
+    executed_vc_amount_total = metrics[3] or Decimal(0)
 
     if total_amount > 0:
         import_percentage = ((total_amount - vc_amount_total) / total_amount) * 100
@@ -78,10 +107,8 @@ def _recalculate_version_metrics(db: Session, version_id: int):
 
     version.total_amount = total_amount
     version.import_percentage = import_percentage
-    
     version.vc_percentage = vc_percentage
     version.vc_amount = vc_amount_total
-    
     version.executed_vc_amount = executed_vc_amount_total
     version.executed_vc_percentage = executed_vc_percentage
 
@@ -294,18 +321,8 @@ def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCre
     if not enstru_item:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Код ЕНС ТРУ не найден")
 
-    # Маппинг type_name на NeedType (Исправлено: добавлена поддержка множественного числа и регистра)
-    type_name_upper = enstru_item.type_name.upper() if enstru_item.type_name else 'GOODS'
-    
-    need_type_map = {
-        'GOOD': models.NeedType.GOODS,
-        'GOODS': models.NeedType.GOODS,
-        'WORK': models.NeedType.WORKS,
-        'WORKS': models.NeedType.WORKS,
-        'SERVICE': models.NeedType.SERVICES,
-        'SERVICES': models.NeedType.SERVICES
-    }
-    need_type = need_type_map.get(type_name_upper, models.NeedType.GOODS)
+    # Используем хелпер
+    need_type = get_need_type_by_typename(enstru_item.type_name)
 
     # Ищем последний номер позиции ДЛЯ ЭТОГО ТИПА
     last_item = db.query(models.PlanItemVersion).filter(
@@ -316,9 +333,15 @@ def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCre
     item_number = (last_item.item_number + 1) if last_item else 1
 
     total_amount = item_in.quantity * item_in.price_per_unit
+    
+    # Если указан unit_id, сбрасываем original_unit_name
+    original_unit_name = item_in.original_unit_name
+    if item_in.unit_id:
+        original_unit_name = None
 
     db_item = models.PlanItemVersion(
-        **item_in.model_dump(),
+        **item_in.model_dump(exclude={'original_unit_name'}),
+        original_unit_name=original_unit_name,
         version_id=active_version.id,
         item_number=item_number,
         total_amount=total_amount,
@@ -329,422 +352,101 @@ def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCre
     db.add(db_item)
     db.flush()
     db_item.root_item_id = db_item.id
-    db.commit()
-
+    
+    # Пересчет метрик и коммит
     _recalculate_version_metrics(db, active_version.id)
 
     db.refresh(db_item)
     return db_item
 
-def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> bytes:
-    if version_id:
-        version = db.query(models.ProcurementPlanVersion).filter(models.ProcurementPlanVersion.id == version_id).first()
-    else:
-        version = _get_active_version(db, plan_id)
-
-    if not version:
-        raise HTTPException(status_code=404, detail="Версия сметы не найдена")
-
-    # Загружаем версию вместе с планом и создателем плана (для получения наименования клиента)
-    version_with_items = db.query(models.ProcurementPlanVersion).options(
-        selectinload(models.ProcurementPlanVersion.items).options(
-            joinedload(models.PlanItemVersion.enstru),
-            joinedload(models.PlanItemVersion.unit),
-            joinedload(models.PlanItemVersion.expense_item),
-            joinedload(models.PlanItemVersion.funding_source),
-            joinedload(models.PlanItemVersion.agsk),
-            joinedload(models.PlanItemVersion.kato_purchase),
-            joinedload(models.PlanItemVersion.kato_delivery),
-            joinedload(models.PlanItemVersion.source_version),
-            joinedload(models.PlanItemVersion.root_item).joinedload(models.PlanItemVersion.version)
-        ),
-        joinedload(models.ProcurementPlanVersion.plan).joinedload(models.ProcurementPlan.creator)
-    ).filter(models.ProcurementPlanVersion.id == version.id).one()
-
-    wb = openpyxl.Workbook()
+def compare_versions(db: Session, plan_id: int, version1_id: int, version2_id: int) -> dict:
+    """
+    Сравнивает две версии плана и возвращает различия.
+    """
+    # Загружаем версии вместе с позициями и справочником ЕНС ТРУ для названия
+    v1 = db.query(models.ProcurementPlanVersion).filter(
+        models.ProcurementPlanVersion.id == version1_id,
+        models.ProcurementPlanVersion.plan_id == plan_id
+    ).options(
+        selectinload(models.ProcurementPlanVersion.items).joinedload(models.PlanItemVersion.enstru)
+    ).first()
     
-    # Стили
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="1B5E20", end_color="1B5E20", fill_type="solid")
-    sub_header_font = Font(bold=True, color="000000")
-    sub_header_fill = PatternFill(start_color="E8F5E9", end_color="E8F5E9", fill_type="solid")
-    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    
-    def format_item_number(idx, item):
-        # Используем переданный индекс для последовательной нумерации
-        number = f"{idx}"
-        if item.revision_number > 0:
-            number += f"-{item.revision_number}"
-        
-        type_suffix = ""
-        if item.need_type == models.NeedType.GOODS: type_suffix = " Т"
-        elif item.need_type == models.NeedType.WORKS: type_suffix = " Р"
-        elif item.need_type == models.NeedType.SERVICES: type_suffix = " У"
-        
-        return f"{number}{type_suffix}"
+    v2 = db.query(models.ProcurementPlanVersion).filter(
+        models.ProcurementPlanVersion.id == version2_id,
+        models.ProcurementPlanVersion.plan_id == plan_id
+    ).options(
+        selectinload(models.ProcurementPlanVersion.items).joinedload(models.PlanItemVersion.enstru)
+    ).first()
 
-    grouped_items = {
-        models.NeedType.GOODS: [],
-        models.NeedType.WORKS: [],
-        models.NeedType.SERVICES: []
+    if not v1 or not v2:
+        raise HTTPException(status_code=404, detail="Одна из версий не найдена")
+
+    items1 = {i.root_item_id: i for i in v1.items if not i.is_deleted}
+    items2 = {i.root_item_id: i for i in v2.items if not i.is_deleted}
+    
+    added = []
+    removed = []
+    changed = []
+    
+    # Поиск добавленных
+    for root_id, item in items2.items():
+        if root_id not in items1:
+            added.append({
+                "id": item.id,
+                "item_number": item.item_number,
+                "trucode": item.trucode,
+                "name": item.enstru.name_rus if item.enstru else "",
+                "amount": item.total_amount
+            })
+        else:
+            # Проверка изменений
+            old_item = items1[root_id]
+            changes = []
+            
+            if old_item.quantity != item.quantity:
+                changes.append({"field": "quantity", "old": old_item.quantity, "new": item.quantity})
+            if old_item.price_per_unit != item.price_per_unit:
+                changes.append({"field": "price", "old": old_item.price_per_unit, "new": item.price_per_unit})
+            if old_item.total_amount != item.total_amount:
+                changes.append({"field": "total_amount", "old": old_item.total_amount, "new": item.total_amount})
+            if old_item.trucode != item.trucode:
+                changes.append({"field": "trucode", "old": old_item.trucode, "new": item.trucode})
+            if old_item.additional_specs != item.additional_specs:
+                changes.append({"field": "additional_specs", "old": old_item.additional_specs, "new": item.additional_specs})
+                
+            if changes:
+                changed.append({
+                    "item_id": item.id,
+                    "item_number": item.item_number,
+                    "root_item_id": root_id,
+                    "trucode": item.trucode,
+                    "name": item.enstru.name_rus if item.enstru else "",
+                    "changes": changes
+                })
+                
+    # Поиск удаленных
+    for root_id, item in items1.items():
+        if root_id not in items2:
+            removed.append({
+                "id": item.id,
+                "item_number": item.item_number,
+                "trucode": item.trucode,
+                "name": item.enstru.name_rus if item.enstru else "",
+                "amount": item.total_amount
+            })
+            
+    # Сортировка списков по номеру позиции
+    added.sort(key=lambda x: x['item_number'])
+    removed.sort(key=lambda x: x['item_number'])
+    changed.sort(key=lambda x: x['item_number'])
+
+    return {
+        "version1": v1.version_number,
+        "version2": v2.version_number,
+        "added_count": len(added),
+        "removed_count": len(removed),
+        "changed_count": len(changed),
+        "added_items": added,
+        "removed_items": removed,
+        "changed_items": changed
     }
-    
-    # Сортировка по item_number внутри групп
-    for item in version_with_items.items:
-        if not item.is_deleted:
-            grouped_items[item.need_type].append(item)
-            
-    for key in grouped_items:
-        grouped_items[key].sort(key=lambda x: x.item_number)
-
-    # --- Лист 1: Основная смета ---
-    ws = wb.active
-    ws.title = "Смета"
-    
-    # Заголовок и информация о проекте
-    ws.merge_cells('A1:Q1')
-    ws['A1'] = "СМЕТА ЗАКУПОК"
-    ws['A1'].font = Font(size=16, bold=True)
-    ws['A1'].alignment = Alignment(horizontal='center')
-    
-    # Наименование проекта
-    ws.merge_cells('A2:Q2')
-    ws['A2'] = f"Наименование проекта: {version_with_items.plan.plan_name}"
-    ws['A2'].font = Font(bold=True, size=12)
-    
-    # Год
-    ws.merge_cells('A3:Q3')
-    ws['A3'] = f"Год: {version_with_items.plan.year}"
-    ws['A3'].font = Font(bold=True, size=12)
-    
-    # Наименование клиента
-    client_name = version_with_items.plan.creator.org_name if version_with_items.plan.creator and version_with_items.plan.creator.org_name else "Не указано"
-    ws.merge_cells('A4:Q4')
-    ws['A4'] = f"Наименование клиента: {client_name}"
-    ws['A4'].font = Font(bold=True, size=12)
-    
-    current_row = 6
-    
-    columns = [
-        "№", 
-        "Код по ЕНС ТРУ", 
-        "Наименование закупаемых товаров услуг работ", 
-        "Краткая характеристика",
-        "Дополнительная характеристика",
-        "Единица измерения(МКЕИ)",
-        "Количество, объём",
-        "Цена за единицу тенге(без НДС)",
-        "Сумма планируемая для закупок ТРУ",
-        "Место закупки(КАТО)",
-        "Место поставки(КАТО)",
-        "Статья затрат",
-        "Источник финансирования",
-        "КОД АГСК для смр",
-        "КТП",
-        "ВЦ %",
-        "Сумма ВЦ тенге без НДС"
-    ]
-    
-    def create_table_header(ws, row_idx, cols):
-        for col_idx, col_name in enumerate(cols, 1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=col_name)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.border = border
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        ws.row_dimensions[row_idx].height = 45
-        return row_idx + 1
-
-    def fill_section(title, items, start_row, is_first_section=False):
-        if not items: return start_row
-        
-        if is_first_section:
-            start_row = create_table_header(ws, start_row, columns)
-        
-        ws.merge_cells(f'A{start_row}:Q{start_row}')
-        ws.cell(row=start_row, column=1, value=title).font = Font(bold=True, size=12)
-        ws.cell(row=start_row, column=1).fill = sub_header_fill
-        start_row += 1
-        
-        section_total = Decimal('0.00')
-        section_vc_amount = Decimal('0.00')
-        
-        for idx, item in enumerate(items, 1):
-            # Логика для АГСК: если СМР и agsk_id нет, то "Прайс-лист"
-            agsk_value = ""
-            if item.expense_item and item.expense_item.name_ru == "СМР":
-                if item.agsk_id:
-                    agsk_value = item.agsk_id
-                else:
-                    agsk_value = "Прайс-лист"
-            elif item.agsk_id:
-                agsk_value = item.agsk_id
-
-            row_data = [
-                format_item_number(idx, item), # Передаем порядковый номер
-                item.trucode,
-                item.enstru.name_rus if item.enstru else "",
-                item.enstru.detail_rus if item.enstru else "",
-                item.additional_specs,
-                item.unit.name_ru if item.unit else "",
-                item.quantity,
-                item.price_per_unit,
-                item.total_amount,
-                item.kato_purchase.name_ru if item.kato_purchase else "",
-                item.kato_delivery.name_ru if item.kato_delivery else "",
-                item.expense_item.name_ru if item.expense_item else "",
-                item.funding_source.name_ru if item.funding_source else "",
-                agsk_value, # Используем вычисленное значение
-                "Да" if item.is_ktp else "Нет",
-                f"{item.min_dvc_percent}",
-                item.vc_amount
-            ]
-            
-            section_total += item.total_amount
-            section_vc_amount += item.vc_amount
-            
-            for col_idx, val in enumerate(row_data, 1):
-                cell = ws.cell(row=start_row, column=col_idx, value=val)
-                cell.border = border
-                if col_idx in [7, 8, 9, 17]: # Числовые поля
-                    cell.number_format = '#,##0.00'
-            
-            start_row += 1
-            
-        # Итого по разделу
-        ws.merge_cells(f'A{start_row}:H{start_row}')
-        ws.cell(row=start_row, column=1, value=f"Итого по {title.lower()}:").font = Font(bold=True)
-        ws.cell(row=start_row, column=1).alignment = Alignment(horizontal='right')
-        ws.cell(row=start_row, column=9, value=section_total).font = Font(bold=True)
-        ws.cell(row=start_row, column=9).number_format = '#,##0.00'
-        
-        # Добавляем итоги по ВЦ для раздела (взвешенное среднее)
-        section_vc_mean = (section_vc_amount / section_total * 100) if section_total > 0 else Decimal('0.00')
-        
-        ws.cell(row=start_row, column=16, value=f"{section_vc_mean.quantize(Decimal('0.00'))}%").font = Font(bold=True)
-        ws.cell(row=start_row, column=17, value=section_vc_amount).font = Font(bold=True)
-        ws.cell(row=start_row, column=17).number_format = '#,##0.00'
-        
-        return start_row + 2
-
-    current_row = fill_section("1. Товары", grouped_items[models.NeedType.GOODS], current_row, is_first_section=True)
-    current_row = fill_section("2. Работы", grouped_items[models.NeedType.WORKS], current_row)
-    current_row = fill_section("3. Услуги", grouped_items[models.NeedType.SERVICES], current_row)
-
-    # Всего
-    ws.merge_cells(f'A{current_row}:H{current_row}')
-    ws.cell(row=current_row, column=1, value="Всего:").font = Font(bold=True, size=12)
-    ws.cell(row=current_row, column=1).alignment = Alignment(horizontal='right')
-    ws.cell(row=current_row, column=9, value=version_with_items.total_amount).font = Font(bold=True, size=12)
-    ws.cell(row=current_row, column=9).number_format = '#,##0.00'
-    
-    # Расчет общего взвешенного среднего процента ВЦ
-    total_vc_mean = (version_with_items.vc_amount / version_with_items.total_amount * 100) if version_with_items.total_amount > 0 else Decimal('0.00')
-
-    current_row += 1
-    ws.cell(row=current_row, column=9, value="Средний % ВЦ:").font = Font(bold=True)
-    ws.cell(row=current_row, column=10, value=f"{total_vc_mean.quantize(Decimal('0.00'))}%").font = Font(bold=True)
-    
-    current_row += 1
-    # ws.cell(row=current_row, column=9, value="Медианный % ВЦ:").font = Font(bold=True) # УДАЛЕНО
-    # ws.cell(row=current_row, column=10, value=f"{version_with_items.vc_median}%").font = Font(bold=True) # УДАЛЕНО
-    
-    current_row += 1
-    ws.cell(row=current_row, column=9, value="Общая сумма ВЦ:").font = Font(bold=True)
-    ws.cell(row=current_row, column=10, value=version_with_items.vc_amount).font = Font(bold=True)
-    ws.cell(row=current_row, column=10).number_format = '#,##0.00'
-    
-    # Автоширина колонок
-    for i, col in enumerate(ws.columns, 1):
-        max_length = 0
-        column_letter = get_column_letter(i)
-        for cell in col:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = (max_length + 2)
-        ws.column_dimensions[column_letter].width = min(adjusted_width, 50)
-
-
-    # --- Лист 2: КТП ---
-    ws_ktp = wb.create_sheet("КТП")
-    
-    ktp_columns = [
-        "№", 
-        "Код по ЕНС ТРУ", 
-        "Наименование закупаемых товаров услуг работ", 
-        "Краткая характеристика",
-        "Дополнительная характеристика",
-        "Единица измерения(МКЕИ)",
-        "Количество, объём",
-        "Цена за единицу тенге(без НДС)",
-        "Сумма планируемая для закупок ТРУ",
-        "Место закупки(КАТО)",
-        "Место поставки(КАТО)",
-        "Статья затрат",
-        "Источник финансирования",
-        "Код АГСК-3 для СМР",
-        "КТП",
-        "Сумма ВЦ тенге без НДС",
-        "БИН производителя",
-        "Наименования производителя",
-        "Адрес/ контакты",
-        "ВЦ% по этому производителю",
-        "Сумма ВЦ тенге без НДС (по производителю)"
-    ]
-    
-    ktp_row = 1
-    ktp_row = create_table_header(ws_ktp, ktp_row, ktp_columns)
-    
-    for t in [models.NeedType.GOODS, models.NeedType.WORKS, models.NeedType.SERVICES]:
-        items = grouped_items[t]
-        for idx, item in enumerate(items, 1):
-            # Проверяем наличие в реестре КТП
-            suppliers = db.query(models.Reestr_KTP).filter(models.Reestr_KTP.enstru_code == item.trucode).all()
-            
-            if suppliers:
-                # Для каждого поставщика создаем строку
-                for supplier in suppliers:
-                    supplier_dvc = Decimal(str(supplier.dvc_percent)) if supplier.dvc_percent is not None else Decimal('0.00')
-                    supplier_vc_amount = item.total_amount * (supplier_dvc / Decimal('100.00'))
-                    
-                    # Логика для АГСК (дублируем)
-                    agsk_value = ""
-                    if item.expense_item and item.expense_item.name_ru == "СМР":
-                        if item.agsk_id:
-                            agsk_value = item.agsk_id
-                        else:
-                            agsk_value = "Прайс-лист"
-                    elif item.agsk_id:
-                        agsk_value = item.agsk_id
-
-                    row_data = [
-                        format_item_number(idx, item), # Используем индекс позиции
-                        item.trucode,
-                        item.enstru.name_rus if item.enstru else "",
-                        item.enstru.detail_rus if item.enstru else "",
-                        item.additional_specs,
-                        item.unit.name_ru if item.unit else "",
-                        item.quantity,
-                        item.price_per_unit,
-                        item.total_amount,
-                        item.kato_purchase.name_ru if item.kato_purchase else "",
-                        item.kato_delivery.name_ru if item.kato_delivery else "",
-                        item.expense_item.name_ru if item.expense_item else "",
-                        item.funding_source.name_ru if item.funding_source else "",
-                        agsk_value,
-                        "Да" if item.is_ktp else "Нет",
-                        item.vc_amount, # Сумма ВЦ общая (по мин. проценту)
-                        
-                        supplier.bin_iin,
-                        supplier.company_name,
-                        f"{supplier.production_address or ''} {supplier.phone or ''} {supplier.email or ''}",
-                        f"{supplier_dvc}",
-                        supplier_vc_amount
-                    ]
-                    
-                    for col_idx, val in enumerate(row_data, 1):
-                        cell = ws_ktp.cell(row=ktp_row, column=col_idx, value=val)
-                        cell.border = border
-                        if col_idx in [7, 8, 9, 16, 21]:
-                            cell.number_format = '#,##0.00'
-                    
-                    ktp_row += 1
-
-    # Автоширина для КТП
-    for i, col in enumerate(ws_ktp.columns, 1):
-        max_length = 0
-        column_letter = get_column_letter(i)
-        for cell in col:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = (max_length + 2)
-        ws_ktp.column_dimensions[column_letter].width = min(adjusted_width, 50)
-
-    # --- Лист 3: Не резидентство ---
-    ws_nr = wb.create_sheet("Услуги, Работы ВЦ меньше 100%")
-    
-    nr_columns = [
-        "№", 
-        "Код по ЕНС ТРУ", 
-        "Наименование закупаемых товаров услуг работ", 
-        "Краткая характеристика",
-        "Дополнительная характеристика",
-        "Единица измерения(МКЕИ)",
-        "Количество, объём",
-        "Цена за единицу тенге без НДС",
-        "Сумма планируемая для закупок ТРУ",
-        "Место закупки(КАТО)",
-        "Место поставки(КАТО)",
-        "Статья затрат",
-        "Источник финансирования",
-        "Код АГСК-3 для СМР",
-        "Доля внутристрановой ценности (%)",
-        "Обоснование если доля внутристрановой ценности меньше 100%"
-    ]
-    
-    nr_row = 1
-    nr_row = create_table_header(ws_nr, nr_row, nr_columns)
-    
-    for t in [models.NeedType.WORKS, models.NeedType.SERVICES]:
-        items = grouped_items[t]
-        for idx, item in enumerate(items, 1):
-            if item.resident_share < 100:
-                # Логика для АГСК (дублируем)
-                agsk_value = ""
-                if item.expense_item and item.expense_item.name_ru == "СМР":
-                    if item.agsk_id:
-                        agsk_value = item.agsk_id
-                    else:
-                        agsk_value = "Прайс-лист"
-                elif item.agsk_id:
-                    agsk_value = item.agsk_id
-
-                row_data = [
-                    format_item_number(idx, item),
-                    item.trucode,
-                    item.enstru.name_rus if item.enstru else "",
-                    item.enstru.detail_rus if item.enstru else "",
-                    item.additional_specs,
-                    item.unit.name_ru if item.unit else "",
-                    item.quantity,
-                    item.price_per_unit,
-                    item.total_amount,
-                    item.kato_purchase.name_ru if item.kato_purchase else "",
-                    item.kato_delivery.name_ru if item.kato_delivery else "",
-                    item.expense_item.name_ru if item.expense_item else "",
-                    item.funding_source.name_ru if item.funding_source else "",
-                    agsk_value,
-                    f"{item.resident_share}",
-                    item.non_resident_reason
-                ]
-                
-                for col_idx, val in enumerate(row_data, 1):
-                    cell = ws_nr.cell(row=nr_row, column=col_idx, value=val)
-                    cell.border = border
-                    if col_idx in [7, 8, 9]:
-                        cell.number_format = '#,##0.00'
-                
-                nr_row += 1
-
-    # Автоширина для Не резидентство
-    for i, col in enumerate(ws_nr.columns, 1):
-        max_length = 0
-        column_letter = get_column_letter(i)
-        for cell in col:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = (max_length + 2)
-        ws_nr.column_dimensions[column_letter].width = min(adjusted_width, 50)
-
-    virtual_workbook = io.BytesIO()
-    wb.save(virtual_workbook)
-    return virtual_workbook.getvalue()

@@ -55,6 +55,9 @@ class PlanItemBase(BaseModel):
     resident_share: Decimal = Field(default=100, ge=0, le=100)
     non_resident_reason: Optional[str] = None
     min_dvc_percent: Optional[Decimal] = Field(default=0, ge=0, le=100)
+    
+    # Новое поле: оригинальное название единицы измерения (для импорта)
+    original_unit_name: Optional[str] = None
 
 class PlanItemCreate(PlanItemBase):
     pass
@@ -77,6 +80,8 @@ class PlanItemUpdate(PlanItemBase):
     resident_share: Optional[Decimal] = Field(None, ge=0, le=100)
     non_resident_reason: Optional[str] = None
     min_dvc_percent: Optional[Decimal] = Field(None, ge=0, le=100)
+    
+    original_unit_name: Optional[str] = None
 
 class PlanItem(BaseModel):
     id: int
@@ -110,6 +115,8 @@ class PlanItem(BaseModel):
     
     # Новое поле: исполненная сумма ВЦ
     executed_vc_amount: Optional[Decimal] = Field(default=0)
+    
+    original_unit_name: Optional[str] = None
 
     start_version_number: int
     
