@@ -1,12 +1,11 @@
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import func, desc, and_, update, case
+from sqlalchemy import func, desc
 from decimal import Decimal
 from fastapi import HTTPException, status
 from ..models import models
 from ..schemas import plan as plan_schema
 from ..utils.helpers import get_need_type_by_typename
 
-# ========= Вспомогательные функции для версий =========
 
 def _get_active_version(db: Session, plan_id: int, lock: bool = False) -> models.ProcurementPlanVersion | None:
     """Получает активную версию плана."""
@@ -17,6 +16,7 @@ def _get_active_version(db: Session, plan_id: int, lock: bool = False) -> models
     if lock:
         query = query.with_for_update()
     return query.first()
+
 
 def _recalculate_version_metrics(db: Session, version_id: int):
     """
@@ -36,15 +36,42 @@ def _recalculate_version_metrics(db: Session, version_id: int):
     
     if trucodes:
         ktp_map = {}
-        ktp_results = db.query(
-            models.Reestr_KTP.enstru_code,
-            func.min(models.Reestr_KTP.dvc_percent)
+        # UPDATED: Adapted for new Reestr_KTP structure (JSONB codes, Text dvc)
+        # Fetch all potential candidates
+        ktp_candidates = db.query(
+            models.Reestr_KTP.enstru_codes,
+            models.Reestr_KTP.dvc_percent
         ).filter(
-            models.Reestr_KTP.enstru_code.in_(trucodes)
-        ).group_by(models.Reestr_KTP.enstru_code).all()
-        
-        for code, dvc in ktp_results:
-            ktp_map[code] = Decimal(str(dvc)) if dvc is not None else Decimal(0)
+            models.Reestr_KTP.enstru_codes.isnot(None),
+            models.Reestr_KTP.dvc_percent.isnot(None)
+        ).all()
+
+        trucodes_set = set(trucodes)
+
+        for candidate in ktp_candidates:
+            codes = candidate.enstru_codes
+            dvc_str = candidate.dvc_percent
+
+            if not codes or not dvc_str:
+                continue
+
+            try:
+                dvc = Decimal(str(dvc_str).replace(',', '.'))
+            except Exception:
+                continue
+
+            if dvc <= 0:
+                continue
+
+            # Intersection check
+            common_codes = set(codes).intersection(trucodes_set)
+
+            for code in common_codes:
+                if code not in ktp_map:
+                    ktp_map[code] = dvc
+                else:
+                    if dvc < ktp_map[code]:
+                        ktp_map[code] = dvc
             
         for code, dvc in ktp_map.items():
             db.query(models.PlanItemVersion).filter(
@@ -56,6 +83,7 @@ def _recalculate_version_metrics(db: Session, version_id: int):
                 models.PlanItemVersion.vc_amount: models.PlanItemVersion.total_amount * (dvc / 100)
             }, synchronize_session=False)
             
+        # Reset those that are not in KTP anymore
         db.query(models.PlanItemVersion).filter(
             models.PlanItemVersion.version_id == version_id,
             models.PlanItemVersion.need_type == models.NeedType.GOODS,
@@ -75,7 +103,7 @@ def _recalculate_version_metrics(db: Session, version_id: int):
         models.PlanItemVersion.vc_amount: models.PlanItemVersion.total_amount * (models.PlanItemVersion.resident_share / 100)
     }, synchronize_session=False)
 
-    db.flush() # Применяем изменения перед агрегацией
+    db.flush()
 
     # 3. Агрегация сумм через SQL
     metrics = db.query(
@@ -96,13 +124,10 @@ def _recalculate_version_metrics(db: Session, version_id: int):
     if total_amount > 0:
         import_percentage = ((total_amount - vc_amount_total) / total_amount) * 100
         vc_percentage = (vc_amount_total / total_amount) * 100
+        executed_vc_percentage = (executed_vc_amount_total / total_amount) * 100
     else:
         import_percentage = Decimal('0.00')
         vc_percentage = Decimal('0.00')
-        
-    if executed_amount_total > 0:
-        executed_vc_percentage = (executed_vc_amount_total / executed_amount_total) * 100
-    else:
         executed_vc_percentage = Decimal('0.00')
 
     version.total_amount = total_amount
@@ -115,7 +140,6 @@ def _recalculate_version_metrics(db: Session, version_id: int):
     db.commit()
     db.refresh(version)
 
-# ========= Сервисы для Смет Закупок (ProcurementPlan) =========
 
 def create_plan(db: Session, plan_in: plan_schema.ProcurementPlanCreate, user: models.User) -> models.ProcurementPlan:
     db_plan = models.ProcurementPlan(
@@ -138,6 +162,7 @@ def create_plan(db: Session, plan_in: plan_schema.ProcurementPlanCreate, user: m
     db.refresh(db_plan)
     return db_plan
 
+
 def get_plan_with_active_version(db: Session, plan_id: int) -> models.ProcurementPlan | None:
     return db.query(models.ProcurementPlan).options(
         selectinload(models.ProcurementPlan.versions)
@@ -157,11 +182,19 @@ def get_plan_with_active_version(db: Session, plan_id: int) -> models.Procuremen
         models.ProcurementPlan.id == plan_id
     ).first()
 
+
 def get_plans_by_user(db: Session, user: models.User, skip: int = 0, limit: int = 100) -> list[models.ProcurementPlan]:
     return db.query(models.ProcurementPlan).options(
         selectinload(models.ProcurementPlan.versions).selectinload(models.ProcurementPlanVersion.creator)
     ).filter(
         models.ProcurementPlan.created_by == user.id
+    ).order_by(desc(models.ProcurementPlan.id)).offset(skip).limit(limit).all()
+
+
+def get_all_plans(db: Session, skip: int = 0, limit: int = 100) -> list[models.ProcurementPlan]:
+    """Получить все планы для аналитика ДРВЦ"""
+    return db.query(models.ProcurementPlan).options(
+        selectinload(models.ProcurementPlan.versions).selectinload(models.ProcurementPlanVersion.creator)
     ).order_by(desc(models.ProcurementPlan.id)).offset(skip).limit(limit).all()
 
 
@@ -187,6 +220,7 @@ def update_plan_status(db: Session, plan_id: int, new_status: models.PlanStatus,
     db.commit()
     db.refresh(active_version)
     return active_version
+
 
 def create_new_version_for_editing(db: Session, plan_id: int, user: models.User) -> models.ProcurementPlanVersion:
     db.begin_nested()
@@ -257,6 +291,7 @@ def create_new_version_for_editing(db: Session, plan_id: int, user: models.User)
         db.rollback()
         raise
 
+
 def delete_latest_version(db: Session, plan_id: int, user: models.User):
     db.begin_nested()
     try:
@@ -289,6 +324,7 @@ def delete_latest_version(db: Session, plan_id: int, user: models.User):
         db.rollback()
         raise
 
+
 def delete_plan(db: Session, plan_id: int):
     plan_to_delete = db.query(models.ProcurementPlan).options(
         selectinload(models.ProcurementPlan.versions)
@@ -308,7 +344,6 @@ def delete_plan(db: Session, plan_id: int):
     db.commit()
     return True
 
-# ========= Сервисы для Позиций Плана (PlanItemVersion) =========
 
 def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCreate, user: models.User) -> models.PlanItemVersion:
     active_version = _get_active_version(db, plan_id)
@@ -321,20 +356,17 @@ def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCre
     if not enstru_item:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Код ЕНС ТРУ не найден")
 
-    # Используем хелпер
     need_type = get_need_type_by_typename(enstru_item.type_name)
 
-    # Ищем последний номер позиции ДЛЯ ЭТОГО ТИПА
     last_item = db.query(models.PlanItemVersion).filter(
         models.PlanItemVersion.version_id == active_version.id,
-        models.PlanItemVersion.need_type == need_type # Фильтр по типу
+        models.PlanItemVersion.need_type == need_type
     ).order_by(desc(models.PlanItemVersion.item_number)).first()
     
     item_number = (last_item.item_number + 1) if last_item else 1
 
     total_amount = item_in.quantity * item_in.price_per_unit
     
-    # Если указан unit_id, сбрасываем original_unit_name
     original_unit_name = item_in.original_unit_name
     if item_in.unit_id:
         original_unit_name = None
@@ -353,17 +385,16 @@ def add_item_to_plan(db: Session, plan_id: int, item_in: plan_schema.PlanItemCre
     db.flush()
     db_item.root_item_id = db_item.id
     
-    # Пересчет метрик и коммит
     _recalculate_version_metrics(db, active_version.id)
 
     db.refresh(db_item)
     return db_item
 
+
 def compare_versions(db: Session, plan_id: int, version1_id: int, version2_id: int) -> dict:
     """
     Сравнивает две версии плана и возвращает различия.
     """
-    # Загружаем версии вместе с позициями и справочником ЕНС ТРУ для названия
     v1 = db.query(models.ProcurementPlanVersion).filter(
         models.ProcurementPlanVersion.id == version1_id,
         models.ProcurementPlanVersion.plan_id == plan_id
@@ -388,7 +419,6 @@ def compare_versions(db: Session, plan_id: int, version1_id: int, version2_id: i
     removed = []
     changed = []
     
-    # Поиск добавленных
     for root_id, item in items2.items():
         if root_id not in items1:
             added.append({
@@ -399,7 +429,6 @@ def compare_versions(db: Session, plan_id: int, version1_id: int, version2_id: i
                 "amount": item.total_amount
             })
         else:
-            # Проверка изменений
             old_item = items1[root_id]
             changes = []
             
@@ -424,7 +453,6 @@ def compare_versions(db: Session, plan_id: int, version1_id: int, version2_id: i
                     "changes": changes
                 })
                 
-    # Поиск удаленных
     for root_id, item in items1.items():
         if root_id not in items2:
             removed.append({
@@ -435,7 +463,6 @@ def compare_versions(db: Session, plan_id: int, version1_id: int, version2_id: i
                 "amount": item.total_amount
             })
             
-    # Сортировка списков по номеру позиции
     added.sort(key=lambda x: x['item_number'])
     removed.sort(key=lambda x: x['item_number'])
     changed.sort(key=lambda x: x['item_number'])

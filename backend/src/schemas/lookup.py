@@ -33,9 +33,10 @@ class Kato(BaseModel):
 # Схема для Agsk
 class Agsk(BaseModel):
     id: int
-    group: str
-    code: str
-    name_ru: str
+    group: Optional[str] = None
+    code: Optional[str] = None
+    name_ru: Optional[str] = None
+    full_name: Optional[str] = None
     standart: Optional[str] = None
     unit: Optional[str] = None
 
@@ -126,3 +127,32 @@ class InitialOptions(BaseModel):
     cost_item: Optional[CostItem] = None
     source_funding: Optional[SourceFunding] = None
     mkei: Optional[Mkei] = None
+
+
+# --- Create схемы для CRUD операций ---
+
+class MkeiCreate(BaseModel):
+    code: str
+    name_kz: str
+    name_ru: str
+
+class KatoCreate(BaseModel):
+    code: str
+    name_kz: str
+    name_ru: str
+
+class AgskCreate(BaseModel):
+    group: Optional[str] = None
+    code: Optional[str] = None
+    name_ru: Optional[str] = None
+    full_name: Optional[str] = None
+    standart: Optional[str] = None
+    unit: Optional[str] = None
+
+class CostItemCreate(BaseModel):
+    name_ru: str
+    name_kz: str
+
+class SourceFundingCreate(BaseModel):
+    name_ru: str
+    name_kz: str

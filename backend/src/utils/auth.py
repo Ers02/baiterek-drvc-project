@@ -7,20 +7,22 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 from ..database.database import get_db
-from ..models.models import User
+from ..models.models import User, UserRole
 from ..core.config import settings
 
-# --- Утилиты для паролей и токенов ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
 
 def verify_password(plain_password, hashed_password):
     if not hashed_password:
         return False
     return pwd_context.verify(plain_password, hashed_password)
 
+
 def get_password_hash(password):
     return pwd_context.hash(password)
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -32,7 +34,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-# --- Основные функции для аутентификации и авторизации ---
 
 def authenticate_user(db: Session, iin: str, password: str) -> Optional[User]:
     """
@@ -42,8 +43,6 @@ def authenticate_user(db: Session, iin: str, password: str) -> Optional[User]:
     if not user:
         return None
         
-    # Если у пользователя нет пароля (старый аккаунт), временно пускаем без пароля
-    # В продакшене это нужно убрать!
     if not user.hashed_password:
         return user
         
@@ -52,9 +51,10 @@ def authenticate_user(db: Session, iin: str, password: str) -> Optional[User]:
         
     return user
 
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     """
-    Декодирует токен, извлекает ИИН пользователя и возвращает объект User из БД.
+    Декодирует токен и возвращает объект User из БД.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,3 +73,44 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if user is None:
         raise credentials_exception
     return user
+
+
+def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Зависимость для проверки прав администратора (полный контроль).
+    Теперь включает аналитика ДРВЦ для доступа к admin эндпоинтам.
+    """
+    if current_user.role in [UserRole.ADMIN, UserRole.ANALYST_DRVC]:
+        return current_user
+    
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Требуются права администратора или аналитика ДРВЦ"
+    )
+
+
+def get_current_analyst_drvc(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Зависимость для проверки прав аналитика ДРВЦ.
+    Аналитик ДРВЦ имеет полные права на управление планами и позициями.
+    """
+    if current_user.role == UserRole.ANALYST_DRVC:
+        return current_user
+    
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Требуются права аналитика ДРВЦ"
+    )
+
+
+def get_current_admin_or_analyst(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Зависимость для проверки прав администратора или аналитика ДРВЦ.
+    """
+    if current_user.role in [UserRole.ADMIN, UserRole.ANALYST_DRVC]:
+        return current_user
+    
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Требуются права администратора или аналитика ДРВЦ"
+    )

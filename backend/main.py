@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.routers import auth, plans, items, lookups, kato_router, execution_router
+from src.routers import auth, plans, items, lookups, kato_router, execution_router, admin, psd_analyst
 from src.database.database import engine
 from src.database.base import Base
 
@@ -29,7 +29,9 @@ api_router.include_router(plans.router)
 api_router.include_router(items.router)
 api_router.include_router(lookups.router)
 api_router.include_router(kato_router.router, prefix="/kato", tags=["kato"])
-api_router.include_router(execution_router.router) # Добавляем новый роутер
+api_router.include_router(execution_router.router)
+api_router.include_router(admin.router) # Подключаем админку
+api_router.include_router(psd_analyst.router) # Подключаем аналитика ПСД
 
 app.mount("/api", api_router)
 

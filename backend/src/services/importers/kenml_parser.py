@@ -3,6 +3,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from fastapi import UploadFile, HTTPException
 
+
 def get_float(val):
     try:
         if val is None: return 0.0
@@ -11,9 +12,11 @@ def get_float(val):
     except ValueError:
         return 0.0
 
+
 def clean_str(val):
     if not val: return ""
     return str(val).strip()
+
 
 def clean_snb(snb, local_code):
     s = clean_str(snb)
@@ -21,6 +24,7 @@ def clean_snb(snb, local_code):
         l = clean_str(local_code)
         return l if l else "БЕЗ_КОДА"
     return s
+
 
 class KenmlParser:
     def __init__(self, file_content: bytes, filename: str):
@@ -128,24 +132,31 @@ class KenmlParser:
                 data.append(self._make_row(cat, p_name, p_code, p_unit, price, p_vol, p_total_orig, "Прямая позиция"))
         return data, control_sum
 
+
 def parse_kenml_file(file: UploadFile) -> list[dict]:
     """
     Парсит KENML/ZIP файл и возвращает список словарей с данными.
     """
     all_data = []
     try:
-        content = file.file.read()
+        # Если file - это MockFile (из admin_service), у него нет .file.read(), а есть .file (BytesIO)
+        if hasattr(file, 'file') and isinstance(file.file, io.BytesIO):
+            content = file.file.getvalue()
+            filename = file.filename
+        else:
+            content = file.file.read()
+            filename = file.filename
         
-        if file.filename.endswith('.zip'):
+        if filename.endswith('.zip'):
             with zipfile.ZipFile(io.BytesIO(content), 'r') as z:
-                for filename in z.namelist():
-                    if filename.endswith('.kenml'):
-                        with z.open(filename) as f:
-                            parser = KenmlParser(f.read(), filename)
+                for fname in z.namelist():
+                    if fname.endswith('.kenml'):
+                        with z.open(fname) as f:
+                            parser = KenmlParser(f.read(), fname)
                             data, _ = parser.parse()
                             all_data.extend(data)
-        elif file.filename.endswith('.kenml') or file.filename.endswith('.xml'):
-             parser = KenmlParser(content, file.filename)
+        elif filename.endswith('.kenml') or filename.endswith('.xml'):
+             parser = KenmlParser(content, filename)
              data, _ = parser.parse()
              all_data.extend(data)
         else:

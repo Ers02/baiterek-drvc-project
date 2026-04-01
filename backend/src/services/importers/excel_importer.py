@@ -9,7 +9,7 @@ from ...models import models
 from ...utils.helpers import get_need_type_by_typename, is_smr
 from ..dictionary_service import get_mkei_map, get_cost_item_map, get_kato_map, get_agsk_map
 
-# --- Pydantic модель для строки импорта ---
+
 class ImportRow(BaseModel):
     row_idx: int
     trucode: str
@@ -32,6 +32,7 @@ class ImportRow(BaseModel):
             raise ValueError("Код ЕНС ТРУ обязателен")
         return v.strip()
 
+
 def extract_code(val):
     if val is None: return None
     val_str = str(val).strip()
@@ -40,23 +41,19 @@ def extract_code(val):
         return val_str.split(" - ")[0].strip()
     return val_str
 
+
 def parse_excel_rows(ws) -> list[dict]:
     """Читает Excel и возвращает список сырых словарей."""
     rows = []
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        # Проверка на пустую строку
         if not any(cell is not None and str(cell).strip() for cell in row):
             continue
             
         row_data = list(row) + [None] * max(0, 16 - len(row))
         
-        # Формируем словарь для Pydantic
         try:
-            # Обработка числовых полей с защитой от None
             qty = row_data[6]
             price = row_data[7]
-            
-            # Обработка доли
             res_share = row_data[14]
             if res_share is None: res_share = 100
             
@@ -82,7 +79,9 @@ def parse_excel_rows(ws) -> list[dict]:
             
     return rows
 
+
 def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -> tuple[list[models.PlanItemVersion], list[dict]]:
+    # RE-APPLY FIX: Updated logic for KTP validation with JSONB
     """
     Основная функция импорта.
     Возвращает (список созданных объектов, список ошибок).
@@ -94,7 +93,6 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
     valid_rows = []
     errors = []
 
-    # 1. Валидация Pydantic и сбор кодов для Batch Fetch (только для ЕНС ТРУ)
     trucodes_to_fetch = set()
 
     for r in raw_rows:
@@ -110,38 +108,59 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
             msg = "; ".join([f"{err['loc'][0]}: {err['msg']}" for err in e.errors()])
             errors.append({"row": r["row_idx"], "message": msg})
 
-    # 2. Загрузка справочников (Кэш + Batch Fetch)
-
-    # Кэшированные справочники (быстрый доступ)
     mkei_map = get_mkei_map()
     kato_map = get_kato_map()
     agsk_map = get_agsk_map()
     cost_map = get_cost_item_map()
     
-    # ЕНС ТРУ (Batch Fetch, так как он большой)
     enstru_map = {}
     if trucodes_to_fetch:
-        # Загружаем только type_name, так как он нужен для логики
         items = db.query(models.Enstru.code, models.Enstru.type_name).filter(models.Enstru.code.in_(trucodes_to_fetch)).all()
         for code, type_name in items:
             enstru_map[code] = type_name
-
-    # Reestr KTP (min dvc)
+            
+    # UPDATED: Validation logic for KTP using new JSONB structure
     reestr_ktp_map = {}
     if trucodes_to_fetch:
-        ktp_results = db.query(
-            models.Reestr_KTP.enstru_code,
-            func.min(models.Reestr_KTP.dvc_percent)
+        # Fetch all potential candidates (optimize by checking if enstru_codes is not null)
+        ktp_candidates = db.query(
+            models.Reestr_KTP.enstru_codes,
+            models.Reestr_KTP.dvc_percent
         ).filter(
-            models.Reestr_KTP.enstru_code.in_(trucodes_to_fetch)
-        ).group_by(models.Reestr_KTP.enstru_code).all()
-        for code, dvc in ktp_results:
-            reestr_ktp_map[code] = Decimal(str(dvc)) if dvc is not None else Decimal(0)
+            models.Reestr_KTP.enstru_codes.isnot(None),
+            models.Reestr_KTP.dvc_percent.isnot(None)
+        ).all()
 
-    # 3. Создание объектов
+        for candidate in ktp_candidates:
+            codes = candidate.enstru_codes
+            dvc_str = candidate.dvc_percent
+            
+            if not codes or not dvc_str:
+                continue
+                
+            try:
+                # Handle text format like "50,5" or "50.5" or just "50"
+                dvc = Decimal(str(dvc_str).replace(',', '.'))
+            except Exception:
+                continue
+                
+            if dvc <= 0:
+                continue
+
+            # Check if any of the candidate's codes match our needed codes
+            # Intersection is faster than iterating
+            common_codes = set(codes).intersection(trucodes_to_fetch)
+            
+            for code in common_codes:
+                if code not in reestr_ktp_map:
+                    reestr_ktp_map[code] = dvc
+                else:
+                    # Keep the minimum DVC found
+                    if dvc < reestr_ktp_map[code]:
+                        reestr_ktp_map[code] = dvc
+
     new_items = []
     
-    # Счетчики номеров
     last_numbers = {
         models.NeedType.GOODS: 0,
         models.NeedType.WORKS: 0,
@@ -155,7 +174,6 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
         if last: last_numbers[nt] = last.item_number
 
     for row in valid_rows:
-        # Проверки справочников
         if row.trucode not in enstru_map:
             errors.append({"row": row.row_idx, "message": f"Не найден ЕНС ТРУ {row.trucode}"})
             continue
@@ -170,7 +188,6 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
              errors.append({"row": row.row_idx, "message": f"Не найдена статья затрат {row.expense_id}"})
              continue
 
-        # Проверка СМР по ID=1
         is_smr_item = is_smr(row.expense_id)
         
         agsk_code = None
@@ -187,11 +204,9 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
              errors.append({"row": row.row_idx, "message": "Для СМР (ID=1) нужен код АГСК или 'Прайс-лист'"})
              continue
 
-        # Определение типа
         type_name = enstru_map[row.trucode]
         need_type = get_need_type_by_typename(type_name)
         
-        # Единица измерения
         unit_id = None
         original_unit_name = None
         
@@ -208,12 +223,10 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
                 errors.append({"row": row.row_idx, "message": "Не указана единица измерения"})
                 continue
         
-        # Корректировка количества для работ/услуг
         quantity = row.quantity
         if need_type != models.NeedType.GOODS:
             quantity = Decimal(1)
             
-        # Доля ВЦ
         resident_share = row.resident_share
         non_resident_reason = row.non_resident_reason
         if need_type == models.NeedType.GOODS:
@@ -224,7 +237,6 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
                 errors.append({"row": row.row_idx, "message": "Нужно обоснование для доли < 100%"})
                 continue
 
-        # Расчет ВЦ
         is_ktp = False
         min_dvc = Decimal(0)
         if need_type == models.NeedType.GOODS:

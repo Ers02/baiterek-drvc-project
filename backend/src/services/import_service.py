@@ -1,95 +1,64 @@
 import io
 import os
 import uuid
+import time
+from decimal import Decimal
 from sqlalchemy.orm import Session
 from fastapi import UploadFile, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+
 from ..models import models
 from ..services import plan_service
 from .exporters.excel_generator import generate_import_template, generate_error_report
 from .importers.excel_importer import import_items_from_excel
 from .importers.kenml_parser import parse_kenml_file
-from ..utils.helpers import is_smr
 from ..core.config import settings
-from ..database.database import SessionLocal
 from ..core.logger import logger
 
-# Экспортируем функции генерации, чтобы роутер их видел
-__all__ = ['generate_import_template', 'process_import_file', 'process_kenml_import', 'process_import_background']
+__all__ = ['generate_import_template', 'process_import_file', 'process_kenml_import']
+
 
 def save_error_report(errors: list, filename: str):
     """Сохраняет отчет об ошибках на диск."""
     if not os.path.exists(settings.REPORT_DIR):
         os.makedirs(settings.REPORT_DIR)
-    
+
     content = generate_error_report(errors)
     path = os.path.join(settings.REPORT_DIR, filename)
     with open(path, "wb") as f:
         f.write(content)
     return path
 
-def background_import_task(plan_id: int, file_content: bytes, user_id: int):
-    """
-    Фоновая задача импорта.
-    Создает свою сессию БД, так как основная уже закрыта.
-    """
-    logger.info(f"Starting background import for plan {plan_id} by user {user_id}")
-    db = SessionLocal()
+
+def delete_file(path: str):
+    """Удаляет файл с диска."""
     try:
-        # Получаем пользователя и план заново
-        user = db.query(models.User).filter(models.User.id == user_id).first()
-        active_version = plan_service._get_active_version(db, plan_id)
-        
-        if not active_version or not user:
-            logger.error(f"Import failed: Plan {plan_id} or User {user_id} not found")
-            return
-
-        # Логика импорта
-        new_items, errors = import_items_from_excel(db, active_version.id, file_content)
-
-        if errors:
-            # Сохраняем отчет об ошибках
-            report_name = f"import_errors_{plan_id}_{uuid.uuid4()}.xlsx"
-            save_error_report(errors, report_name)
-            logger.warning(f"Import finished with errors. Report saved to {report_name}")
-            # Можно отправить уведомление пользователю (WebSocket/Email)
-            return
-
-        if not new_items:
-            logger.info("Import finished: No items found")
-            return
-
-        try:
-            db.add_all(new_items)
-            db.flush()
-            
-            for item in new_items:
-                item.root_item_id = item.id
-            
-            plan_service._recalculate_version_metrics(db, active_version.id)
-            # commit происходит внутри recalculate
-            logger.info(f"Import success: {len(new_items)} items added")
-            
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Import DB error: {str(e)}")
-            
+        if os.path.exists(path):
+            os.remove(path)
+            logger.info(f"Deleted file: {path}")
     except Exception as e:
-        logger.error(f"Background task error: {str(e)}")
-    finally:
-        db.close()
+        logger.error(f"Error deleting file {path}: {e}")
 
-def process_import_file(db: Session, plan_id: int, file: UploadFile, user: models.User, background_tasks: BackgroundTasks):
+
+def process_import_file(
+    db: Session, 
+    plan_id: int, 
+    file: UploadFile, 
+    user: models.User, 
+    background_tasks: BackgroundTasks
+):
     """
-    Запускает импорт в фоне.
+    Синхронный импорт Excel.
+    Возвращает JSON при успехе или Excel-файл при ошибках валидации.
     """
+    start_time = time.time()
+    logger.info(f"Starting import for plan {plan_id}")
+
     active_version = plan_service._get_active_version(db, plan_id)
     if not active_version:
         raise HTTPException(status_code=404, detail="Активная версия плана не найдена")
-    
     if active_version.status != models.PlanStatus.DRAFT:
         raise HTTPException(status_code=403, detail="Импорт возможен только в черновик")
-    
     if active_version.plan.created_by != user.id:
         raise HTTPException(status_code=403, detail="Нет прав на редактирование этого плана")
 
@@ -99,24 +68,67 @@ def process_import_file(db: Session, plan_id: int, file: UploadFile, user: model
         logger.error(f"Error reading file upload: {e}")
         raise HTTPException(status_code=400, detail="Ошибка чтения файла")
 
-    # Запускаем фоновую задачу
-    background_tasks.add_task(background_import_task, plan_id, contents, user.id)
-    
-    return JSONResponse(content={"message": "Файл принят в обработку. Результат появится позже."})
+    t1 = time.time()
+    new_items, errors = import_items_from_excel(db, active_version.id, contents)
+    logger.info(f"Excel parsing took {time.time() - t1:.2f}s. Items: {len(new_items)}, Errors: {len(errors)}")
+
+    if errors:
+        filename = f"import_errors_{uuid.uuid4()}.xlsx"
+        path = save_error_report(errors, filename)
+        
+        # Планируем удаление после отправки
+        background_tasks.add_task(delete_file, path)
+        
+        return FileResponse(
+            path,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            filename="import_errors.xlsx"
+        )
+
+    if not new_items:
+        raise HTTPException(status_code=400, detail="Файл пуст или не содержит корректных данных")
+
+    try:
+        t2 = time.time()
+        db.add_all(new_items)
+        db.flush()
+        logger.info(f"DB flush took {time.time() - t2:.2f}s")
+        
+        t3 = time.time()
+        for item in new_items:
+            item.root_item_id = item.id
+        logger.info(f"Setting root_item_id took {time.time() - t3:.2f}s")
+        
+        t4 = time.time()
+        plan_service._recalculate_version_metrics(db, active_version.id)
+        logger.info(f"Recalculate metrics took {time.time() - t4:.2f}s")
+        
+        logger.info(f"Total import time: {time.time() - start_time:.2f}s")
+        
+        return JSONResponse(content={"message": f"Успешно импортировано {len(new_items)} позиций"})
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Import DB error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при сохранении данных: {str(e)}")
+
+
+def clean_product_name(name: str) -> str:
+    if not name: return ""
+    return name.split('/')[0].strip()
 
 
 def process_kenml_import(db: Session, file: UploadFile):
     """
     Парсит KENML/ZIP, агрегирует данные и генерирует Excel-шаблон.
-    (Оставляем синхронным, так как пользователь ждет файл сразу)
+    Синхронный режим. Fuzzy Search отключен для скорости.
     """
     try:
         all_data = parse_kenml_file(file)
     except Exception as e:
         logger.error(f"KENML parse error: {e}")
-        raise
+        raise HTTPException(status_code=400, detail=f"Ошибка обработки файла: {str(e)}")
 
-    # Фильтрация и агрегация
     goods = {}
     works_services = {}
     
@@ -158,31 +170,52 @@ def process_kenml_import(db: Session, file: UploadFile):
         
     final_rows.sort(key=lambda x: x['total'], reverse=True)
     
-    # Поиск ЕНС ТРУ по АГСК
-    agsk_codes = set(r['code_agsk'] for r in final_rows if r['code_agsk'] and r['code_agsk'] != "БЕЗ_КОДА")
+    # Поиск по АГСК (Обновлено для JSONB)
+    agsk_codes_to_find = set(r['code_agsk'] for r in final_rows if r['code_agsk'] and r['code_agsk'] != "БЕЗ_КОДА")
     agsk_to_enstru = {}
-    if agsk_codes:
-        records = db.query(models.Reestr_KTP.agsk3_code, models.Reestr_KTP.enstru_code).filter(
-            models.Reestr_KTP.agsk3_code.in_(agsk_codes)
-        ).all()
-        for agsk, enstru in records:
-            if agsk and enstru: agsk_to_enstru[agsk] = enstru
+    
+    if agsk_codes_to_find:
+        # Fetch relevant records from KTP
+        # Note: Filtering JSONB array containment efficiently without index or specific operator is hard in pure ORM for 'any of list'.
+        # We will fetch records that have agsk3_codes and filter in python.
+        ktp_records = db.query(models.Reestr_KTP.agsk3_codes, models.Reestr_KTP.enstru_codes)\
+            .filter(models.Reestr_KTP.agsk3_codes.isnot(None)).all()
+            
+        for rec in ktp_records:
+            if not rec.agsk3_codes or not rec.enstru_codes: continue
+            
+            # Map each AGSK code in the record to the first ENSTRU code
+            first_enstru = rec.enstru_codes[0]
+            for agsk in rec.agsk3_codes:
+                if agsk in agsk_codes_to_find:
+                    agsk_to_enstru[agsk] = first_enstru
 
-    # Получение наименований и ВЦ
-    enstru_codes = set(agsk_to_enstru.values())
+    # Сбор данных для Excel (ЕНС ТРУ и ДВЦ)
+    all_found_enstru_codes = set(agsk_to_enstru.values())
     enstru_names = {}
     enstru_dvc = {}
     
-    if enstru_codes:
-        for code, name in db.query(models.Enstru.code, models.Enstru.name_rus).filter(models.Enstru.code.in_(enstru_codes)).all():
+    if all_found_enstru_codes:
+        # Get names from ENSTRU dict
+        for code, name in db.query(models.Enstru.code, models.Enstru.name_rus).filter(models.Enstru.code.in_(all_found_enstru_codes)).all():
             enstru_names[code] = name
             
-        from sqlalchemy import func
-        dvc_records = db.query(models.Reestr_KTP.enstru_code, func.max(models.Reestr_KTP.dvc_percent)).filter(
-            models.Reestr_KTP.enstru_code.in_(enstru_codes)
-        ).group_by(models.Reestr_KTP.enstru_code).all()
-        for code, dvc in dvc_records:
-            enstru_dvc[code] = dvc
+        # Get Max DVC from KTP (Updated logic for JSONB/Text)
+        ktp_candidates = db.query(models.Reestr_KTP.enstru_codes, models.Reestr_KTP.dvc_percent)\
+            .filter(models.Reestr_KTP.enstru_codes.isnot(None), models.Reestr_KTP.dvc_percent.isnot(None)).all()
+            
+        for cand in ktp_candidates:
+            if not cand.enstru_codes: continue
+            try:
+                dvc = Decimal(str(cand.dvc_percent).replace(',', '.'))
+            except:
+                continue
+                
+            # Check overlap
+            common = set(cand.enstru_codes).intersection(all_found_enstru_codes)
+            for code in common:
+                if code not in enstru_dvc or dvc > enstru_dvc[code]:
+                    enstru_dvc[code] = dvc
 
     # Генерация Excel
     import openpyxl
@@ -195,6 +228,7 @@ def process_kenml_import(db: Session, file: UploadFile):
 
     for idx, row in enumerate(final_rows, start=1):
         excel_row = idx + 1
+        
         enstru_code = agsk_to_enstru.get(row['code_agsk'], "")
         
         ws.cell(row=excel_row, column=1, value=idx)

@@ -331,6 +331,7 @@ export default function PlanItemForm() {
                         value={formData.quantity || ''} 
                         onChange={e => setFormData(prev => ({ ...prev, quantity: Number(e.target.value) }))} 
                         sx={{ backgroundColor: !isGoods ? '#f5f5f5' : 'inherit' }}
+                        onWheel={(e) => (e.target as HTMLElement).blur()}
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
@@ -342,6 +343,7 @@ export default function PlanItemForm() {
                         fullWidth 
                         value={formData.price_per_unit || ''} 
                         onChange={e => setFormData(prev => ({ ...prev, price_per_unit: Number(e.target.value) }))} 
+                        onWheel={(e) => (e.target as HTMLElement).blur()}
                     />
                   </Grid>
                 </Grid>
@@ -430,6 +432,7 @@ export default function PlanItemForm() {
                             }}
                             inputProps={{ min: 0, max: 100 }}
                             error={formData.resident_share === undefined || formData.resident_share === null || formData.resident_share === ''}
+                            onWheel={(e) => (e.target as HTMLElement).blur()}
                         />
                         {Number(formData.resident_share) < 100 && (
                             <TextField

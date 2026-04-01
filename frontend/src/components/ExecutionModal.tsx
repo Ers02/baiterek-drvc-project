@@ -3,7 +3,7 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions, Button,
     TextField, Typography, Table, TableBody, TableCell,
     TableContainer, TableHead, TableRow, Paper, IconButton, Box, Alert, LinearProgress, Stack, CircularProgress, Autocomplete, Link,
-    Grid, Card, CardContent, Divider, InputAdornment, Chip, Tooltip, Switch, FormControlLabel
+    Grid, Card, CardContent, Divider, InputAdornment, Chip, Tooltip
 } from '@mui/material';
 import {
     Delete as DeleteIcon, 
@@ -41,77 +41,72 @@ const formatNumber = (val: number) => new Intl.NumberFormat('ru-RU', {maximumFra
 
 // --- Компонент сводки (Дашборд) ---
 const ExecutionSummary = ({ planQty, planAmt, execQty, execAmt, t }: { planQty: number, planAmt: number, execQty: number, execAmt: number, t: any }) => {
-    // Прогресс считается по ФАКТИЧЕСКОМУ объему поставки
     const qtyPercent = Math.min((execQty / planQty) * 100, 100);
     const amtPercent = Math.min((execAmt / planAmt) * 100, 100);
     const remainingQty = planQty - execQty;
     const remainingAmt = planAmt - execAmt;
 
     return (
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-            <Grid item xs={12} md={6}>
-                <Card variant="outlined" sx={{ bgcolor: '#f8faff' }}>
-                    <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-                            <Typography variant="subtitle2" color="text.secondary" fontWeight="bold">
-                                {t('quantity_progress')} (Факт поставки)
-                            </Typography>
-                            <Chip 
-                                label={`${qtyPercent.toFixed(1)}%`} 
-                                size="small" 
-                                color={qtyPercent >= 100 ? "success" : "primary"} 
-                                variant={qtyPercent >= 100 ? "filled" : "outlined"}
-                            />
-                        </Stack>
-                        <LinearProgress 
-                            variant="determinate" 
-                            value={qtyPercent} 
-                            sx={{ height: 8, borderRadius: 4, mb: 1 }} 
-                            color={execQty > planQty ? "error" : "primary"}
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 3 }}>
+            <Card variant="outlined" sx={{ bgcolor: '#f8faff', flex: 1 }}>
+                <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+                        <Typography variant="subtitle2" color="text.secondary" fontWeight="bold">
+                            {t('quantity_progress')} (Факт поставки)
+                        </Typography>
+                        <Chip 
+                            label={`${qtyPercent.toFixed(1)}%`} 
+                            size="small" 
+                            color={qtyPercent >= 100 ? "success" : "primary"} 
+                            variant={qtyPercent >= 100 ? "filled" : "outlined"}
                         />
-                        <Stack direction="row" justifyContent="space-between">
-                            <Typography variant="caption">
-                                Факт: <b>{formatNumber(execQty)}</b> / {formatNumber(planQty)}
-                            </Typography>
-                            <Typography variant="caption" color={remainingQty < 0 ? "error.main" : "text.secondary"}>
-                                Остаток: {formatNumber(remainingQty)}
-                            </Typography>
-                        </Stack>
-                    </CardContent>
-                </Card>
-            </Grid>
-            <Grid item xs={12} md={6}>
-                <Card variant="outlined" sx={{ bgcolor: '#f8faff' }}>
-                    <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-                            <Typography variant="subtitle2" color="text.secondary" fontWeight="bold">
-                                {t('amount_progress')} (Факт поставки)
-                            </Typography>
-                            <Chip 
-                                label={`${amtPercent.toFixed(1)}%`} 
-                                size="small" 
-                                color={amtPercent >= 100 ? "success" : "primary"} 
-                                variant={amtPercent >= 100 ? "filled" : "outlined"}
-                            />
-                        </Stack>
-                        <LinearProgress 
-                            variant="determinate" 
-                            value={amtPercent} 
-                            sx={{ height: 8, borderRadius: 4, mb: 1 }} 
-                            color={execAmt > planAmt ? "error" : "primary"}
+                    </Stack>
+                    <LinearProgress 
+                        variant="determinate" 
+                        value={qtyPercent} 
+                        sx={{ height: 8, borderRadius: 4, mb: 1 }} 
+                        color={execQty > planQty ? "error" : "primary"}
+                    />
+                    <Stack direction="row" justifyContent="space-between">
+                        <Typography variant="caption">
+                            Факт: <b>{formatNumber(execQty)}</b> / {formatNumber(planQty)}
+                        </Typography>
+                        <Typography variant="caption" color={remainingQty < 0 ? "error.main" : "text.secondary"}>
+                            Остаток: {formatNumber(remainingQty)}
+                        </Typography>
+                    </Stack>
+                </CardContent>
+            </Card>
+            <Card variant="outlined" sx={{ bgcolor: '#f8faff', flex: 1 }}>
+                <CardContent sx={{ py: 2, '&:last-child': { pb: 2 } }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+                        <Typography variant="subtitle2" color="text.secondary" fontWeight="bold">
+                            {t('amount_progress')} (Факт поставки)
+                        </Typography>
+                        <Chip 
+                            label={`${amtPercent.toFixed(1)}%`} 
+                            size="small" 
+                            color={amtPercent >= 100 ? "success" : "primary"} 
+                            variant={amtPercent >= 100 ? "filled" : "outlined"}
                         />
-                        <Stack direction="row" justifyContent="space-between">
-                            <Typography variant="caption">
-                                Факт: <b>{formatMoney(execAmt)}</b>
-                            </Typography>
-                            <Typography variant="caption" color={remainingAmt < 0 ? "error.main" : "text.secondary"}>
-                                Остаток: {formatMoney(remainingAmt)}
-                            </Typography>
-                        </Stack>
-                    </CardContent>
-                </Card>
-            </Grid>
-        </Grid>
+                    </Stack>
+                    <LinearProgress 
+                        variant="determinate" 
+                        value={amtPercent} 
+                        sx={{ height: 8, borderRadius: 4, mb: 1 }} 
+                        color={execAmt > planAmt ? "error" : "primary"}
+                    />
+                    <Stack direction="row" justifyContent="space-between">
+                        <Typography variant="caption">
+                            Факт: <b>{formatMoney(execAmt)}</b>
+                        </Typography>
+                        <Typography variant="caption" color={remainingAmt < 0 ? "error.main" : "text.secondary"}>
+                            Остаток: {formatMoney(remainingAmt)}
+                        </Typography>
+                    </Stack>
+                </CardContent>
+            </Card>
+        </Stack>
     );
 };
 
@@ -192,8 +187,8 @@ const ExecutionForm = React.memo(({
     planQuantity,
     planAmount,
     planPricePerUnit,
-    executedQuantity, // Факт поставки (для расчета остатка плана)
-    executedAmount,   // Факт поставки (для расчета остатка плана)
+    executedQuantity,
+    executedAmount,
     onSuccess,
     t,
     trucode,
@@ -213,11 +208,9 @@ const ExecutionForm = React.memo(({
     const [error, setError] = useState('');
     const [loadingSupplier, setLoadingSupplier] = useState(false);
 
-    // Refs
     const contractNumberRef = useRef<HTMLInputElement>(null);
     const contractDateRef = useRef<HTMLInputElement>(null);
     
-    // State
     const [contractQuantity, setContractQuantity] = useState<string>('');
     const [supplyPhysical, setSupplyPhysical] = useState<string>('');
     const [price, setPrice] = useState<string>('');
@@ -225,13 +218,10 @@ const ExecutionForm = React.memo(({
     const [supplierName, setSupplierName] = useState<string>('');
     const [factVcPercentage, setFactVcPercentage] = useState<string>('0');
     
-    // Suppliers logic
     const [foundSuppliers, setFoundSuppliers] = useState<KtpSupplier[]>([]);
     const [selectedCertificate, setSelectedCertificate] = useState<KtpSupplier | null>(null);
-    const [isManualMode, setIsManualMode] = useState(false);
+    const [isSupplierFromDB, setIsSupplierFromDB] = useState(false);
 
-    // Calculations
-    // Остаток плана для валидации новых ДОГОВОРОВ = План - ФАКТ ПОСТАВКИ
     const remainingPlanQuantity = planQuantity - executedQuantity;
     const remainingPlanAmount = planAmount - executedAmount;
 
@@ -243,61 +233,45 @@ const ExecutionForm = React.memo(({
     const currentSupplyValue = currentSupplyPhysical * currentPrice;
     const currentVcPercentage = Number(factVcPercentage) || 0;
 
-    // Validation
     const validation = useMemo(() => ({
-        // Валидация: Кол-во по договору не может превышать оставшийся план (с учетом факта поставки)
         isContractQuantityOverLimit: currentContractQuantity > remainingPlanQuantity + 0.001,
         isContractAmountOverLimit: currentContractSum > remainingPlanAmount + 0.01,
-        
         isPriceOverLimit: currentPrice > planPricePerUnit + 0.01,
-        
-        // Валидация: Объем поставки не может быть больше Кол-ва по договору
         isSupplyOverContract: currentSupplyPhysical > currentContractQuantity + 0.001,
-        
         isBinInvalid: supplierBin.length > 0 && supplierBin.length !== 12,
         isVcPercentageInvalid: currentVcPercentage < 0 || currentVcPercentage > 100
     }), [currentContractQuantity, currentSupplyPhysical, currentPrice, currentContractSum, remainingPlanQuantity, remainingPlanAmount, planPricePerUnit, supplierBin, currentVcPercentage]);
 
-    // Handlers
     const handleBinChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
         if (/^\d*$/.test(val) && val.length <= 12) {
             setSupplierBin(val);
             
+            setSupplierName('');
+            setFoundSuppliers([]);
+            setSelectedCertificate(null);
+            setFactVcPercentage('0');
+            setIsSupplierFromDB(false);
+
             if (val.length === 12) {
                 setLoadingSupplier(true);
-                setIsManualMode(false);
                 try {
                     const suppliers = await getSupplierByBin(val, trucode);
                     setFoundSuppliers(suppliers);
                     
                     if (suppliers.length > 0) {
                         setSupplierName(suppliers[0].company_name);
+                        setIsSupplierFromDB(true);
                         if (suppliers.length === 1) {
                             const supplier = suppliers[0];
                             setSelectedCertificate(supplier);
                             setFactVcPercentage(String(supplier.dvc_percent || 0));
-                        } else {
-                            setSelectedCertificate(null);
-                            setFactVcPercentage('0');
                         }
-                    } else {
-                        setSupplierName(''); 
-                        setSelectedCertificate(null);
-                        setFactVcPercentage('0');
                     }
                 } catch (err) {
                     console.error(err);
                 } finally {
                     setLoadingSupplier(false);
-                }
-            } else {
-                if (foundSuppliers.length > 0) {
-                    setSupplierName('');
-                    setFoundSuppliers([]);
-                    setSelectedCertificate(null);
-                    setFactVcPercentage('0');
-                    setIsManualMode(false);
                 }
             }
         }
@@ -306,27 +280,6 @@ const ExecutionForm = React.memo(({
     const handleCertificateSelect = (event: any, newValue: KtpSupplier | null) => {
         setSelectedCertificate(newValue);
         setFactVcPercentage(newValue?.dvc_percent ? String(newValue.dvc_percent) : '0');
-    };
-    
-    const toggleManualMode = () => {
-        const newMode = !isManualMode;
-        setIsManualMode(newMode);
-        if (newMode) {
-            setSelectedCertificate(null);
-            setFactVcPercentage('0');
-        } else {
-            if (foundSuppliers.length > 0) {
-                setSupplierName(foundSuppliers[0].company_name);
-                if (foundSuppliers.length === 1) {
-                    const supplier = foundSuppliers[0];
-                    setSelectedCertificate(supplier);
-                    setFactVcPercentage(String(supplier.dvc_percent || 0));
-                } else {
-                    setSelectedCertificate(null);
-                    setFactVcPercentage('0');
-                }
-            }
-        }
     };
 
     const handleSubmit = async () => {
@@ -343,8 +296,8 @@ const ExecutionForm = React.memo(({
         if (validation.isPriceOverLimit) { setError(`${t('error_price_exceeds_plan')} (${planPricePerUnit})`); return; }
         if (validation.isSupplyOverContract) { setError("Объем поставки не может превышать количество по договору"); return; }
         if (validation.isVcPercentageInvalid) { setError("Процент ВЦ должен быть от 0 до 100"); return; }
-        if (foundSuppliers.length > 1 && !selectedCertificate && !isManualMode) {
-             setError("Выберите товар из списка сертификатов поставщика или переключитесь в ручной режим");
+        if (foundSuppliers.length > 1 && !selectedCertificate) {
+             setError("Выберите товар из реестра КТП");
              return;
         }
 
@@ -364,9 +317,8 @@ const ExecutionForm = React.memo(({
 
             await createExecution(payload);
             
-            // Reset form
             setSupplierName(''); setSupplierBin(''); setFoundSuppliers([]); setSelectedCertificate(null);
-            setFactVcPercentage('0'); setIsManualMode(false);
+            setFactVcPercentage('0'); setIsSupplierFromDB(false);
             if (contractNumberRef.current) contractNumberRef.current.value = '';
             if (contractDateRef.current) contractDateRef.current.value = '';
             setContractQuantity(''); setSupplyPhysical(''); setPrice('');
@@ -377,14 +329,13 @@ const ExecutionForm = React.memo(({
         }
     };
     
-    // Logic for VC field state
     const hasValidCertificate = selectedCertificate && selectedCertificate.dvc_percent && selectedCertificate.dvc_percent > 0;
     let isVcDisabled = false;
     let vcHelperText = "";
 
-    if (!isManualMode && hasValidCertificate) {
+    if (hasValidCertificate) {
         isVcDisabled = true;
-        vcHelperText = "Значение из сертификата";
+        vcHelperText = "Значение из реестра КТП";
     } else if (needType === 'GOODS') {
         isVcDisabled = true;
         vcHelperText = "Для товаров без сертификата КТП ВЦ = 0%";
@@ -401,224 +352,194 @@ const ExecutionForm = React.memo(({
             
             {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-            <Grid container spacing={3}>
+            <Stack spacing={2.5}>
                 {/* --- Секция 1: Поставщик --- */}
-                <Grid item xs={12}>
+                <Box>
                     <Typography variant="subtitle2" color="primary" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <BusinessIcon fontSize="small" /> Данные поставщика
                     </Typography>
-                    <Divider sx={{ mb: 2 }} />
-                    <Grid container spacing={2}>
-                        <Grid item xs={12} md={4}>
-                            <TextField
-                                fullWidth
-                                label={t('supplier_bin')}
-                                value={supplierBin}
-                                onChange={handleBinChange}
-                                required
-                                error={validation.isBinInvalid}
-                                helperText={validation.isBinInvalid ? "12 цифр" : ""}
-                                inputProps={{ maxLength: 12 }}
-                                InputProps={{
-                                    endAdornment: loadingSupplier ? <CircularProgress size={20} /> : <InputAdornment position="end"><SearchIcon color="action" /></InputAdornment>
-                                }}
-                                size="small"
-                            />
-                        </Grid>
-                        <Grid item xs={12} md={8}>
-                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                                <TextField
-                                    fullWidth
-                                    label={t('supplier_name')}
-                                    value={supplierName}
-                                    onChange={(e) => setSupplierName(e.target.value)}
-                                    required
-                                    disabled={foundSuppliers.length > 0 && !isManualMode}
-                                    size="small"
-                                    sx={{ bgcolor: (foundSuppliers.length > 0 && !isManualMode) ? '#f5f5f5' : 'inherit' }}
-                                />
-                                {foundSuppliers.length > 0 && (
-                                    <Tooltip title={isManualMode ? "Вернуться к поиску" : "Редактировать вручную"}>
-                                        <IconButton onClick={toggleManualMode} color={isManualMode ? "primary" : "default"} sx={{ border: '1px solid #ddd' }}>
-                                            {isManualMode ? <RefreshIcon /> : <EditIcon />}
-                                        </IconButton>
-                                    </Tooltip>
-                                )}
-                            </Box>
-                        </Grid>
-                    </Grid>
-                </Grid>
+                    <Divider sx={{ mb: 2, mt: 1 }} />
+                    <Stack spacing={2}>
+                        <TextField
+                            fullWidth
+                            label={t('supplier_bin')}
+                            value={supplierBin}
+                            onChange={handleBinChange}
+                            required
+                            error={validation.isBinInvalid}
+                            helperText={validation.isBinInvalid ? "12 цифр" : ""}
+                            inputProps={{ maxLength: 12 }}
+                            InputProps={{
+                                endAdornment: loadingSupplier ? <CircularProgress size={20} /> : <InputAdornment position="end"><SearchIcon color="action" /></InputAdornment>
+                            }}
+                            size="small"
+                        />
+                        <TextField
+                            fullWidth
+                            label={t('supplier_name')}
+                            value={supplierName}
+                            onChange={(e) => setSupplierName(e.target.value)}
+                            required
+                            disabled={isSupplierFromDB}
+                            size="small"
+                            sx={{ bgcolor: isSupplierFromDB ? '#f5f5f5' : 'inherit' }}
+                        />
+                    </Stack>
+                </Box>
 
                 {/* --- Секция 2: Договор --- */}
-                <Grid item xs={12} md={6}>
+                <Box>
                     <Typography variant="subtitle2" color="primary" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <ContractIcon fontSize="small" /> Договор
                     </Typography>
-                    <Divider sx={{ mb: 2 }} />
-                    <Grid container spacing={2}>
-                        <Grid item xs={6}>
-                            <TextField
-                                fullWidth
-                                label={t('contract_number')}
-                                inputRef={contractNumberRef}
-                                required
-                                size="small"
-                                InputProps={{ startAdornment: <InputAdornment position="start"><NumberIcon fontSize="small" /></InputAdornment> }}
-                            />
-                        </Grid>
-                        <Grid item xs={6}>
-                            <TextField
-                                fullWidth
-                                type="date"
-                                label={t('contract_date')}
-                                inputRef={contractDateRef}
-                                InputLabelProps={{ shrink: true }}
-                                required
-                                size="small"
-                            />
-                        </Grid>
-                        <Grid item xs={6}>
-                            <TextField
-                                fullWidth
-                                type="number"
-                                label="Кол-во по договору"
-                                value={contractQuantity}
-                                onChange={(e) => setContractQuantity(e.target.value)}
-                                required
-                                error={validation.isContractQuantityOverLimit}
-                                helperText={validation.isContractQuantityOverLimit ? `Превышен остаток плана (${formatNumber(remainingPlanQuantity)})` : ""}
-                                size="small"
-                            />
-                        </Grid>
-                        <Grid item xs={6}>
-                            <TextField
-                                fullWidth
-                                type="number"
-                                label={t('contract_price')}
-                                value={price}
-                                onChange={(e) => setPrice(e.target.value)}
-                                required
-                                error={validation.isPriceOverLimit}
-                                helperText={validation.isPriceOverLimit ? `${t('max_price')}: ${planPricePerUnit}` : ''}
-                                size="small"
-                                InputProps={{ endAdornment: <InputAdornment position="end">₸</InputAdornment> }}
-                            />
-                        </Grid>
-                        <Grid item xs={12}>
-                            <TextField
-                                fullWidth
-                                type="number"
-                                label="Сумма договора"
-                                value={currentContractSum.toFixed(2)}
-                                disabled
-                                error={validation.isContractAmountOverLimit}
-                                helperText={validation.isContractAmountOverLimit ? `Превышен остаток плана (${formatMoney(remainingPlanAmount)})` : ""}
-                                size="small"
-                                sx={{ bgcolor: '#f9f9f9' }}
-                                InputProps={{ endAdornment: <InputAdornment position="end">₸</InputAdornment> }}
-                            />
-                        </Grid>
-                    </Grid>
-                </Grid>
+                    <Divider sx={{ mb: 2, mt: 1 }} />
+                    <Stack spacing={2}>
+                        <TextField
+                            fullWidth
+                            label={t('contract_number')}
+                            inputRef={contractNumberRef}
+                            required
+                            size="small"
+                            InputProps={{ startAdornment: <InputAdornment position="start"><NumberIcon fontSize="small" /></InputAdornment> }}
+                        />
+                        <TextField
+                            fullWidth
+                            type="date"
+                            label={t('contract_date')}
+                            inputRef={contractDateRef}
+                            InputLabelProps={{ shrink: true }}
+                            required
+                            size="small"
+                        />
+                        <TextField
+                            fullWidth
+                            type="number"
+                            label="Кол-во по договору"
+                            value={contractQuantity}
+                            onChange={(e) => setContractQuantity(e.target.value)}
+                            required
+                            error={validation.isContractQuantityOverLimit}
+                            helperText={validation.isContractQuantityOverLimit ? `Превышен остаток плана (${formatNumber(remainingPlanQuantity)})` : ""}
+                            size="small"
+                            onWheel={(e) => (e.target as HTMLElement).blur()}
+                        />
+                        <TextField
+                            fullWidth
+                            type="number"
+                            label={t('contract_price')}
+                            value={price}
+                            onChange={(e) => setPrice(e.target.value)}
+                            required
+                            error={validation.isPriceOverLimit}
+                            helperText={validation.isPriceOverLimit ? `${t('max_price')}: ${planPricePerUnit}` : ''}
+                            size="small"
+                            InputProps={{ endAdornment: <InputAdornment position="end">₸</InputAdornment> }}
+                            onWheel={(e) => (e.target as HTMLElement).blur()}
+                        />
+                        <TextField
+                            fullWidth
+                            type="number"
+                            label="Сумма договора"
+                            value={currentContractSum.toFixed(2)}
+                            disabled
+                            error={validation.isContractAmountOverLimit}
+                            helperText={validation.isContractAmountOverLimit ? `Превышен остаток плана (${formatMoney(remainingPlanAmount)})` : ""}
+                            size="small"
+                            sx={{ bgcolor: '#f9f9f9' }}
+                            InputProps={{ endAdornment: <InputAdornment position="end">₸</InputAdornment> }}
+                        />
+                    </Stack>
+                </Box>
 
                 {/* --- Секция 3: Факт поставки --- */}
-                <Grid item xs={12} md={6}>
+                <Box>
                     <Typography variant="subtitle2" color="primary" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <SupplyIcon fontSize="small" /> Факт поставки (Акт)
                     </Typography>
-                    <Divider sx={{ mb: 2 }} />
-                    <Grid container spacing={2}>
-                        <Grid item xs={6}>
-                            <TextField
-                                fullWidth
-                                type="number"
-                                label="Объем поставки (нат.)"
-                                value={supplyPhysical}
-                                onChange={(e) => setSupplyPhysical(e.target.value)}
-                                required
-                                error={validation.isSupplyOverContract}
-                                helperText={validation.isSupplyOverContract ? "Не может быть больше кол-ва по договору" : ""}
-                                size="small"
-                            />
-                        </Grid>
-                        <Grid item xs={6}>
-                            <TextField
-                                fullWidth
-                                type="number"
-                                label="Объем поставки (стоим.)"
-                                value={currentSupplyValue.toFixed(2)}
-                                disabled
-                                size="small"
-                                sx={{ bgcolor: '#e8f5e9' }}
-                                InputProps={{ endAdornment: <InputAdornment position="end">₸</InputAdornment> }}
-                            />
-                        </Grid>
-                    </Grid>
-                </Grid>
+                    <Divider sx={{ mb: 2, mt: 1 }} />
+                    <Stack spacing={2}>
+                        <TextField
+                            fullWidth
+                            type="number"
+                            label="Объем поставки (нат.)"
+                            value={supplyPhysical}
+                            onChange={(e) => setSupplyPhysical(e.target.value)}
+                            required
+                            error={validation.isSupplyOverContract}
+                            helperText={validation.isSupplyOverContract ? "Не может быть больше кол-ва по договору" : ""}
+                            size="small"
+                            onWheel={(e) => (e.target as HTMLElement).blur()}
+                        />
+                        <TextField
+                            fullWidth
+                            type="number"
+                            label="Объем поставки (стоим.)"
+                            value={currentSupplyValue.toFixed(2)}
+                            disabled
+                            size="small"
+                            sx={{ bgcolor: '#e8f5e9' }}
+                            InputProps={{ endAdornment: <InputAdornment position="end">₸</InputAdornment> }}
+                        />
+                    </Stack>
+                </Box>
 
                 {/* --- Секция 4: Местное содержание --- */}
-                <Grid item xs={12}>
+                <Box>
                     <Typography variant="subtitle2" color="primary" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <PercentIcon fontSize="small" /> Внутристрановая ценность (Реестр КТП)
+                        <PercentIcon fontSize="small" /> Внутристрановая ценность
                     </Typography>
-                    <Divider sx={{ mb: 2 }} />
-                    
-                    {foundSuppliers.length > 1 && !isManualMode && (
-                        <Autocomplete
-                            options={foundSuppliers}
-                            getOptionLabel={(option) => `${option.product_name} (ВЦ: ${option.dvc_percent}%)`}
-                            value={selectedCertificate}
-                            onChange={handleCertificateSelect}
-                            renderInput={(params) => (
-                                <TextField {...params} label="Выберите товар из сертификата" size="small" sx={{ mb: 2 }} />
-                            )}
-                            renderOption={(props, option) => (
-                                <li {...props} key={option.id}>
-                                    <Box>
-                                        <Typography variant="body2" fontWeight="bold">{option.product_name}</Typography>
-                                        <Typography variant="caption" display="block">ВЦ: {option.dvc_percent}% | {option.production_address}</Typography>
-                                    </Box>
-                                </li>
-                            )}
+                    <Divider sx={{ mb: 2, mt: 1 }} />
+                    <Stack spacing={2}>
+                        {foundSuppliers.length > 1 && (
+                            <Autocomplete
+                                fullWidth
+                                options={foundSuppliers}
+                                getOptionLabel={(option) => `${option.product_name} (ВЦ: ${option.dvc_percent}%)`}
+                                value={selectedCertificate}
+                                onChange={handleCertificateSelect}
+                                renderInput={(params) => (
+                                    <TextField {...params} label="Выберите товар из реестра КТП" size="small" />
+                                )}
+                                renderOption={(props, option) => (
+                                    <li {...props} key={option.id}>
+                                        <Box>
+                                            <Typography variant="body2" fontWeight="bold">{option.product_name}</Typography>
+                                            <Typography variant="caption" display="block">ВЦ: {option.dvc_percent}% | {option.production_address}</Typography>
+                                        </Box>
+                                    </li>
+                                )}
+                            />
+                        )}
+                        <TextField
+                            fullWidth
+                            type="number"
+                            label={t('vc_mean_percent')}
+                            value={factVcPercentage}
+                            onChange={(e) => setFactVcPercentage(e.target.value)}
+                            required
+                            disabled={isVcDisabled}
+                            helperText={vcHelperText}
+                            size="small"
+                            InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                            sx={{ bgcolor: isVcDisabled ? '#f5f5f5' : 'inherit' }}
+                            onWheel={(e) => (e.target as HTMLElement).blur()}
                         />
-                    )}
-
-                    {selectedCertificate && !isManualMode && (
-                        <Alert severity="success" icon={<PercentIcon />} sx={{ mb: 2, py: 0 }}>
-                            <Typography variant="body2">
-                                Товар по Реестру КТП: <b>{selectedCertificate.product_name}</b> (ВЦ: {selectedCertificate.dvc_percent}%)
-                            </Typography>
-                        </Alert>
-                    )}
-
-                    <TextField
-                        fullWidth
-                        type="number"
-                        label={t('vc_mean_percent')}
-                        value={factVcPercentage}
-                        onChange={(e) => setFactVcPercentage(e.target.value)}
-                        required
-                        disabled={isVcDisabled}
-                        helperText={vcHelperText}
-                        size="small"
-                        InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
-                        sx={{ bgcolor: isVcDisabled ? '#f5f5f5' : 'inherit' }}
-                    />
-                </Grid>
-
-                <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                        variant="contained"
-                        startIcon={<AddIcon />}
-                        onClick={handleSubmit}
-                        disabled={validation.isContractQuantityOverLimit || validation.isContractAmountOverLimit || validation.isPriceOverLimit || validation.isBinInvalid || !supplierBin || validation.isVcPercentageInvalid || validation.isSupplyOverContract}
-                        size="large"
-                        sx={{ px: 4 }}
-                    >
-                        {t('add_record')}
-                    </Button>
-                </Grid>
-            </Grid>
+                    </Stack>
+                </Box>
+            </Stack>
+            
+            <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={handleSubmit}
+                    disabled={validation.isContractQuantityOverLimit || validation.isContractAmountOverLimit || validation.isPriceOverLimit || validation.isBinInvalid || !supplierBin || validation.isVcPercentageInvalid || validation.isSupplyOverContract}
+                    size="large"
+                    sx={{ px: 4 }}
+                >
+                    {t('add_record')}
+                </Button>
+            </Box>
         </Paper>
     );
 });
@@ -670,14 +591,11 @@ const ExecutionModal: React.FC<ExecutionModalProps> = ({
         }
     }, [t, loadExecutions]);
 
-    // Расчет сумм по договорам и по факту поставки
-    const {contractedQuantity, contractedAmount, executedQuantity, executedAmount} = useMemo(() => {
+    const { executedQuantity, executedAmount } = useMemo(() => {
         return executions.reduce((acc, exec) => ({
-            contractedQuantity: acc.contractedQuantity + Number(exec.contract_quantity),
-            contractedAmount: acc.contractedAmount + Number(exec.contract_sum),
             executedQuantity: acc.executedQuantity + Number(exec.supply_volume_physical),
             executedAmount: acc.executedAmount + Number(exec.supply_volume_value)
-        }), {contractedQuantity: 0, contractedAmount: 0, executedQuantity: 0, executedAmount: 0});
+        }), { executedQuantity: 0, executedAmount: 0 });
     }, [executions]);
 
     return (
@@ -695,9 +613,7 @@ const ExecutionModal: React.FC<ExecutionModalProps> = ({
                 <ExecutionSummary 
                     planQty={planQuantity} 
                     planAmt={planAmount} 
-                    contractedQty={contractedQuantity} // Передаем для информации, если нужно
-                    contractedAmt={contractedAmount}   // Передаем для информации, если нужно
-                    execQty={executedQuantity} 
+                    execQty={executedQuantity}
                     execAmt={executedAmount} 
                     t={t} 
                 />
@@ -707,8 +623,8 @@ const ExecutionModal: React.FC<ExecutionModalProps> = ({
                     planQuantity={planQuantity}
                     planAmount={planAmount}
                     planPricePerUnit={planPricePerUnit}
-                    executedQuantity={executedQuantity} // Передаем факт поставки для расчета остатка плана
-                    executedAmount={executedAmount}     // Передаем факт поставки для расчета остатка плана
+                    executedQuantity={executedQuantity}
+                    executedAmount={executedAmount}
                     onSuccess={loadExecutions}
                     t={t}
                     trucode={trucode}

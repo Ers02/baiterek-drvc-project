@@ -175,7 +175,8 @@ export const translations = {
     contract_info: 'Договор',
     no_records: 'Нет записей',
     max_price: 'Макс. цена',
-
+    video_instruction: 'Видеоинструкция',
+    video_instruction_title: 'Видеоинструкция по смете',
     // StatusChip
     status_DRAFT: 'Черновик',
     status_PRE_APPROVED: 'На согласовании',
@@ -236,6 +237,8 @@ export const translations = {
     my_procurement_plans: 'Менің сметаларым',
 
     // Dashboard
+    video_instruction: 'Видеоинструкция',
+    video_instruction_title: 'Видеоинструкция по смете',
     dashboard_title: 'Менің сатып алу сметаларым',
     no_plans_found: 'Сметалар табылмады.',
     no_plans_found_total: 'Сметалар табылмады.',

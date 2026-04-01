@@ -27,11 +27,15 @@ import {
 } from '../services/api';
 import type { ProcurementPlan, ProcurementPlanVersion, PlanItemVersion } from '../services/api';
 
-// ОПТИМИЗАЦИЯ: Создаем форматтер один раз вне компонента
-const currencyFormatter = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 });
+const currencyFormatter = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 2 });
 const formatCurrency = (amount: number) => currencyFormatter.format(amount);
 
-// --- Новый компонент для карточки статистики ---
+const formatPercent = (value: number) => {
+    if (value === 0) return '0.0%';
+    if (value < 0.1) return value.toFixed(3) + '%';
+    return value.toFixed(1) + '%';
+};
+
 const DetailedStatsCard = ({ 
     title, 
     data, 
@@ -75,7 +79,7 @@ const DetailedStatsCard = ({
                         />
                     </Box>
                     <Typography variant="caption" fontWeight="bold" sx={{ color }}>
-                        {item.percentage.toFixed(1)}%
+                        {formatPercent(item.percentage)}
                     </Typography>
                 </Box>
             )}
@@ -90,9 +94,9 @@ const DetailedStatsCard = ({
                     </Box>
                     {item.executedPercentage !== undefined && (
                          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <Typography variant="caption" color="text.secondary">% Факт:</Typography>
+                            <Typography variant="caption" color="text.secondary">% Факт (от плана):</Typography>
                             <Typography variant="caption" fontWeight="bold" color="success.main">
-                                {item.executedPercentage.toFixed(1)}%
+                                {formatPercent(item.executedPercentage)}
                             </Typography>
                         </Box>
                     )}
@@ -105,7 +109,6 @@ const DetailedStatsCard = ({
   </Paper>
 );
 
-// --- Новый компонент секции статистики ---
 const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) => {
   const { t } = useTranslation();
 
@@ -159,14 +162,14 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
         amount: s.vc, 
         percentage: s.total > 0 ? (s.vc / s.total) * 100 : 0,
         executedAmount: s.executedVc,
-        executedPercentage: s.executedTotal > 0 ? (s.executedVc / s.executedTotal) * 100 : 0
+        executedPercentage: s.total > 0 ? (s.executedVc / s.total) * 100 : 0
     }));
     
     const importData = buildStatData(s => ({ 
         amount: s.total - s.vc, 
         percentage: s.total > 0 ? ((s.total - s.vc) / s.total) * 100 : 0,
         executedAmount: s.executedTotal - s.executedVc,
-        executedPercentage: s.executedTotal > 0 ? ((s.executedTotal - s.executedVc) / s.executedTotal) * 100 : 0
+        executedPercentage: s.total > 0 ? ((s.executedTotal - s.executedVc) / s.total) * 100 : 0
     }));
     
     const totalData = buildStatData(s => ({ 
@@ -192,7 +195,6 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
   );
 };
 
-// Chip for displaying status
 const StatusChip = ({ status, isExecuted }: { status: PlanStatus, isExecuted: boolean }) => {
   const { t } = useTranslation();
   
@@ -209,7 +211,6 @@ const StatusChip = ({ status, isExecuted }: { status: PlanStatus, isExecuted: bo
   return <Chip label={label} color={color as any} variant="outlined" sx={{ fontWeight: 'bold' }} />;
 };
 
-// Функция для форматирования номера позиции
 const formatItemNumber = (item: PlanItemVersion) => {
     let number = `${item.item_number}`;
     
@@ -226,14 +227,13 @@ const formatItemNumber = (item: PlanItemVersion) => {
     return number;
 };
 
-// ОПТИМИЗАЦИЯ: Выносим строку таблицы в отдельный мемоизированный компонент
 const PlanItemRow = React.memo(({ 
     item, 
     activeVersionId, 
     isEditable, 
     isApproved, 
     t, 
-    lang, // Добавил lang
+    lang,
     onEdit, 
     onDelete, 
     onRevert, 
@@ -288,13 +288,9 @@ const PlanItemRow = React.memo(({
             <TableCell align="right">{item.quantity}</TableCell>
             <TableCell align="right">{formatCurrency(item.price_per_unit)}</TableCell>
             <TableCell align="right" sx={{ fontWeight: 'bold' }}>{formatCurrency(item.total_amount)}</TableCell>
-            
-            {/* Колонка Мин. ВЦ % */}
             <TableCell align="center">
                 {item.min_dvc_percent ? `${Number(item.min_dvc_percent).toFixed(2)}%` : '-'}
             </TableCell>
-            
-            {/* Колонка Сумма ВЦ */}
             <TableCell align="right">
                 {item.vc_amount ? formatCurrency(Number(item.vc_amount)) : '-'}
             </TableCell>
@@ -367,7 +363,7 @@ const PlanItemRow = React.memo(({
 export default function PlanForm() {
   const { planId } = useParams<{ planId: string }>();
   const navigate = useNavigate();
-  const { t, lang } = useTranslation(); // Добавил lang
+  const { t, lang } = useTranslation();
 
   const [plan, setPlan] = useState<ProcurementPlan | null>(null);
   const [activeVersion, setActiveVersion] = useState<ProcurementPlanVersion | null>(null);
@@ -376,39 +372,32 @@ export default function PlanForm() {
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [nextStatus, setNextStatus] = useState<PlanStatus | null>(null);
   
-  // State for Execution Modal
   const [isExecutionModalOpen, setExecutionModalOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [selectedItemName, setSelectedItemName] = useState('');
   const [selectedItemQuantity, setSelectedItemQuantity] = useState(0);
   const [selectedItemAmount, setSelectedItemAmount] = useState(0);
   const [selectedItemPrice, setSelectedItemPrice] = useState(0);
-  const [selectedItemTrucode, setSelectedItemTrucode] = useState(''); // Added trucode state
-  const [selectedItemNeedType, setSelectedItemNeedType] = useState(''); // Added need_type state
+  const [selectedItemTrucode, setSelectedItemTrucode] = useState('');
+  const [selectedItemNeedType, setSelectedItemNeedType] = useState('');
 
-  // State for Import Modal
   const [isImportModalOpen, setImportModalOpen] = useState(false);
 
-  // State for Filters
-  const [searchText, setSearchText] = useState('');
   const [showKtpOnly, setShowKtpOnly] = useState(false);
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
 
-  // Separate search states
   const [searchEnstru, setSearchEnstru] = useState('');
   const [searchName, setSearchName] = useState('');
   const [searchAgsk, setSearchAgsk] = useState('');
   const [searchSpecs, setSearchSpecs] = useState('');
 
-  // Pagination state
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
 
-  // State for Compare Modal
   const [isCompareModalOpen, setCompareModalOpen] = useState(false);
   const [compareResult, setCompareResult] = useState<any>(null);
   const [compareLoading, setCompareLoading] = useState(false);
-  const [compareTab, setCompareTab] = useState(0); // 0: Changed, 1: Added, 2: Removed
+  const [compareTab, setCompareTab] = useState(0);
 
   const loadPlan = useCallback(async () => {
     if (!planId) return;
@@ -477,7 +466,6 @@ export default function PlanForm() {
       setError(err.response?.data?.detail || t('error_importing_kenml') || "Ошибка импорта KENML");
     } finally {
       setLoading(false);
-      // Сбрасываем value, чтобы можно было выбрать тот же файл снова
       event.target.value = '';
     }
   };
@@ -516,12 +504,12 @@ export default function PlanForm() {
 
   const openExecutionModal = useCallback((item: PlanItemVersion) => {
     setSelectedItemId(item.id);
-    setSelectedItemName(item.enstru?.name_rus || ''); // Используем name_rus
+    setSelectedItemName(item.enstru?.name_rus || '');
     setSelectedItemQuantity(Number(item.quantity));
     setSelectedItemAmount(Number(item.total_amount));
     setSelectedItemPrice(Number(item.price_per_unit));
-    setSelectedItemTrucode(item.trucode); // Set trucode
-    setSelectedItemNeedType(item.need_type); // Set need_type
+    setSelectedItemTrucode(item.trucode);
+    setSelectedItemNeedType(item.need_type);
     setExecutionModalOpen(true);
   }, []);
 
@@ -530,10 +518,9 @@ export default function PlanForm() {
       target: { value },
     } = event;
     setFilterTypes(
-      // On autofill we get a stringified value.
       typeof value === 'string' ? value.split(',') : value,
     );
-    setPage(0); // Reset page on filter change
+    setPage(0);
   };
 
   const handleChangePage = (event: unknown, newPage: number) => {
@@ -548,7 +535,6 @@ export default function PlanForm() {
   const handleCompareVersions = async () => {
     if (!plan || !activeVersion || plan.versions.length < 2) return;
     
-    // Сравниваем текущую (активную) версию с предыдущей
     const sortedVersions = [...plan.versions].sort((a, b) => a.version_number - b.version_number);
     const currentIndex = sortedVersions.findIndex(v => v.id === activeVersion.id);
     
@@ -604,9 +590,7 @@ export default function PlanForm() {
     });
   }, [activeVersion, searchEnstru, searchName, searchAgsk, searchSpecs, showKtpOnly, filterTypes]);
 
-  // Сортировка и пагинация
   const sortedAndPaginatedItems = useMemo(() => {
-    // Сортировка по типу (Товар, Работа, Услуга) и номеру
     const typeOrder: Record<string, number> = { 'Товар': 1, 'Работа': 2, 'Услуга': 3 };
     
     const sorted = [...filteredItems].sort((a, b) => {
@@ -618,13 +602,11 @@ export default function PlanForm() {
         return a.item_number - b.item_number;
     });
 
-    // Пагинация
     return sorted.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   }, [filteredItems, page, rowsPerPage]);
 
   const hasItems = filteredItems.length > 0;
 
-  // Функция для перевода названий полей
   const getFieldLabel = (field: string) => {
       switch (field) {
           case 'quantity': return t('item_quantity') || 'Количество';
@@ -779,7 +761,7 @@ export default function PlanForm() {
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                    <FormControl size="small" fullWidth sx={{ minWidth: 170 }}>
+                    <FormControl size="small" fullWidth>
                         <InputLabel>{t('need_type') || 'Тип закупки'}</InputLabel>
                         <Select
                         multiple
@@ -892,7 +874,6 @@ export default function PlanForm() {
         </DialogActions>
       </Dialog>
       
-      {/* Модальное окно сравнения версий */}
       <Dialog open={isCompareModalOpen} onClose={() => setCompareModalOpen(false)} maxWidth="lg" fullWidth>
         <DialogTitle>Сравнение версий</DialogTitle>
         <DialogContent>

@@ -7,71 +7,63 @@ from openpyxl.utils import quote_sheetname
 from sqlalchemy.orm import Session
 from ...models import models
 
+
 def generate_import_template(db: Session) -> bytes:
     """Генерирует Excel-шаблон с отдельными листами для справочников и именованными диапазонами."""
     wb = openpyxl.Workbook()
     
-    # Удаляем дефолтный лист, создадим свой
     default_sheet = wb.active
     wb.remove(default_sheet)
 
-    # --- Функция-помощник для создания листа справочника ---
     def create_ref_sheet(sheet_name, data_list, range_name):
         ws = wb.create_sheet(sheet_name)
-        ws.sheet_state = 'hidden' # Скрываем лист
+        ws.sheet_state = 'hidden'
         
-        # Записываем данные
         for idx, val in enumerate(data_list, start=1):
             ws.cell(row=idx, column=1, value=val)
         
         if data_list:
-            # Создаем именованный диапазон (Defined Name)
             quoted_name = quote_sheetname(sheet_name)
             formula = f"{quoted_name}!$A$1:$A${len(data_list)}"
             d_name = DefinedName(range_name, attr_text=formula)
             wb.defined_names.add(d_name)
 
-    # 1. Подготовка данных для МКЕИ
     mkeis = db.query(models.Mkei.code, models.Mkei.name_ru).all()
     mkei_data = [f"{code} - {name}" for code, name in mkeis]
     create_ref_sheet("Ref_MKEI", mkei_data, "List_MKEI")
 
-    # 2. Подготовка данных для Статей затрат
     cost_items = db.query(models.Cost_Item.id, models.Cost_Item.name_ru).all()
     cost_data = [f"{id} - {name}" for id, name in cost_items]
     create_ref_sheet("Ref_Cost", cost_data, "List_Cost")
 
-    # 3. Подготовка данных для Источников
     sources = db.query(models.Source_Funding.id, models.Source_Funding.name_ru).all()
     source_data = [f"{id} - {name}" for id, name in sources]
     create_ref_sheet("Ref_Source", source_data, "List_Source")
 
-    # 4. Подготовка данных для КАТО
     katos = db.query(models.Kato.code, models.Kato.name_ru).all()
     kato_data = [f"{code} - {name}" for code, name in katos]
     create_ref_sheet("Ref_KATO", kato_data, "List_KATO")
 
-    # --- Основной лист: Данные для заполнения ---
     ws_data = wb.create_sheet("Позиции для загрузки", 0)
     
     headers = [
-        "№",                                      # A
-        "Код по ЕНС ТРУ",                         # B
-        "Наименование закупаемых товаров, работ и услуг", # C
-        "Дополнительная характеристика (рус)",    # D
-        "Дополнительная характеристика (каз)",    # E
-        "Единица измерения(МКЕИ) (для товаров)", # F
-        "Количество, объем",                      # G
-        "Цена за единицу, тенге без НДС",         # H
-        "Сумма планируемая для закупок ТРУ без НДС, тенге", # I
-        "Место закупки (КАТО)",                   # J
-        "Место поставки (КАТО)",                  # K
-        "Статья затрат",                          # L
-        "Источник финансирования",                # M
-        "Код АГСК (для СМР)\nИз справочника АГСК-3",                     # N
-        "Доля внутристрановой ценности (%)",           # O
-        "Обоснование если доля внутристрановой ценности ниже 100%",              # P
-        "Сумма ВЦ (тенге)" # Q
+        "№",
+        "Код по ЕНС ТРУ",
+        "Наименование закупаемых товаров, работ и услуг",
+        "Дополнительная характеристика (рус)",
+        "Дополнительная характеристика (каз)",
+        "Единица измерения(МКЕИ) (для товаров)",
+        "Количество, объем",
+        "Цена за единицу, тенге без НДС",
+        "Сумма планируемая для закупок ТРУ без НДС, тенге",
+        "Место закупки (КАТО)",
+        "Место поставки (КАТО)",
+        "Статья затрат",
+        "Источник финансирования",
+        "Код АГСК (для СМР)\nИз справочника АГСК-3",
+        "Доля внутристрановой ценности (%)",
+        "Обоснование если доля внутристрановой ценности ниже 100%",
+        "Сумма ВЦ (тенге)"
     ]
     
     header_font = Font(bold=True, color="FFFFFF")
@@ -86,13 +78,11 @@ def generate_import_template(db: Session) -> bytes:
         cell.fill = header_fill
         cell.alignment = header_alignment
 
-    # Настройка ширины колонок
     widths = {'A': 5, 'B': 20, 'C': 20, 'D': 20, 'E': 20, 'F': 20, 'G': 15, 'H': 15, 
               'I': 20, 'J': 21, 'K': 21, 'L': 21, 'M': 21, 'N': 22, 'O': 17, 'P': 30, 'Q': 20}
     for col, width in widths.items():
         ws_data.column_dimensions[col].width = width
 
-    # --- Настройка Data Validation ---
     data_rows_count = 2000 
 
     def add_dv(formula_name, col_letter):
@@ -112,6 +102,7 @@ def generate_import_template(db: Session) -> bytes:
     virtual_workbook = io.BytesIO()
     wb.save(virtual_workbook)
     return virtual_workbook.getvalue()
+
 
 def generate_error_report(errors: list) -> bytes:
     """Генерирует Excel-файл с отчетом об ошибках."""

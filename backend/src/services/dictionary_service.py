@@ -1,10 +1,7 @@
 from functools import lru_cache
-from sqlalchemy.orm import Session
 from ..models import models
 from ..database.database import SessionLocal
 
-# Используем отдельную сессию для кэша, чтобы не зависеть от сессии запроса
-# Но так как мы кэшируем простые структуры данных (dict), сессия нужна только один раз
 
 @lru_cache(maxsize=1)
 def get_mkei_map():
@@ -16,6 +13,7 @@ def get_mkei_map():
     finally:
         db.close()
 
+
 @lru_cache(maxsize=1)
 def get_cost_item_map():
     """Возвращает словарь {id: id} для проверки существования статьи затрат."""
@@ -25,6 +23,7 @@ def get_cost_item_map():
         return {id: id for id, in items}
     finally:
         db.close()
+
 
 @lru_cache(maxsize=1)
 def get_kato_map():
@@ -36,19 +35,23 @@ def get_kato_map():
     finally:
         db.close()
 
-@lru_cache(maxsize=1)
+
+# @lru_cache(maxsize=1) # REMOVED: Caching was causing issues with outdated data
 def get_agsk_map():
-    """Возвращает словарь {code: code} для АГСК."""
+    """Возвращает словарь {code: code} для АГСК. Данные всегда свежие."""
     db = SessionLocal()
     try:
-        items = db.query(models.Agsk.code).all()
+        # Filter out null or empty codes
+        items = db.query(models.Agsk.code).filter(models.Agsk.code.isnot(None), models.Agsk.code != '').all()
         return {code: code for code, in items}
     finally:
         db.close()
+
 
 def clear_cache():
     """Очищает кэш (вызывать при обновлении справочников)."""
     get_mkei_map.cache_clear()
     get_cost_item_map.cache_clear()
     get_kato_map.cache_clear()
-    get_agsk_map.cache_clear()
+    # get_agsk_map is no longer cached, so no need to clear
+    # get_agsk_map.cache_clear()

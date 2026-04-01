@@ -5,12 +5,14 @@ from ..schemas import plan as plan_schema
 from ..services import item_service
 from ..utils.auth import get_current_user
 from ..models import models
+from ..models.models import UserRole
 
 router = APIRouter(
     prefix="/items",
     tags=["Plan Items"],
     dependencies=[Depends(get_current_user)]
 )
+
 
 @router.get("/{item_id}", response_model=plan_schema.PlanItem)
 def read_plan_item(
@@ -23,11 +25,11 @@ def read_plan_item(
     if db_item is None:
         raise HTTPException(status_code=404, detail="Позиция не найдена")
     
-    # Проверка прав доступа через план
-    if db_item.version.plan.created_by != current_user.id:
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_item.version.plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для доступа к этой позиции")
         
     return db_item
+
 
 @router.put("/{item_id}", response_model=plan_schema.PlanItem)
 def update_plan_item(
@@ -40,6 +42,10 @@ def update_plan_item(
     Обновить позицию сметы.
     Редактирование возможно только для версий в статусе DRAFT.
     """
+    # Аналитик ДРВЦ может редактировать позиции
+    # if current_user.role == UserRole.ANALYST_DRVC:
+    #      raise HTTPException(status_code=403, detail="Администратор не может редактировать позиции")
+         
     return item_service.update_item(db=db, item_id=item_id, item_in=item_in, user=current_user)
 
 
@@ -53,8 +59,13 @@ def delete_plan_item(
     Удалить позицию сметы.
     Удаление возможно только для версий в статусе DRAFT.
     """
+    # Аналитик ДРВЦ может удалять позиции
+    # if current_user.role == UserRole.ANALYST_DRVC:
+    #      raise HTTPException(status_code=403, detail="Администратор не может удалять позиции")
+         
     item_service.delete_item(db=db, item_id=item_id, user=current_user)
     return {"ok": True}
+
 
 @router.post("/{item_id}/revert", response_model=plan_schema.PlanItem)
 def revert_plan_item(
@@ -65,4 +76,8 @@ def revert_plan_item(
     """
     Откатить изменения позиции к состоянию из предыдущей версии плана.
     """
+    # Аналитик ДРВЦ может откатывать позиции
+    # if current_user.role == UserRole.ANALYST_DRVC:
+    #      raise HTTPException(status_code=403, detail="Администратор не может откатывать позиции")
+
     return item_service.revert_item(db=db, item_id=item_id, user=current_user)

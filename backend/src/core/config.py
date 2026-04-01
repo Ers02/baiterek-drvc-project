@@ -24,6 +24,10 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices('jwt_expire_minutes', 'ACCESS_TOKEN_EXPIRE_MINUTES')
     )
     
+    # Админ (Hardcoded)
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "admin123" # В реальном проекте смените на сложный пароль!
+    
     # Бизнес-логика
     SMR_COST_ITEM_ID: int = 1 # ID статьи затрат "СМР"
     

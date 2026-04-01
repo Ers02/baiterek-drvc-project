@@ -1,14 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
-from fastapi.responses import StreamingResponse, JSONResponse
-from sqlalchemy.orm import Session
-from typing import List, Union
 import io
+from typing import List, Union
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
 from ..database.database import get_db
 from ..schemas import plan as plan_schema
 from ..services import plan_service, import_service
 from ..services.exporters import plan_exporter
 from ..utils.auth import get_current_user
 from ..models import models
+from ..models.models import UserRole
 
 router = APIRouter(
     prefix="/plans",
@@ -16,7 +18,6 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)]
 )
 
-# ========= Эндпоинты для Планов (ProcurementPlan) =========
 
 @router.post("/", response_model=plan_schema.ProcurementPlan, status_code=status.HTTP_201_CREATED)
 def create_procurement_plan(
@@ -24,11 +25,12 @@ def create_procurement_plan(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Создать новый план закупок.
-    Автоматически создается первая версия (v1) со статусом DRAFT.
-    """
+    # Аналитик ДРВЦ может создавать планы
+    # if current_user.role == UserRole.ANALYST_DRVC:
+    #     raise HTTPException(status_code=403, detail="Администратор не может создавать планы")
+        
     return plan_service.create_plan(db=db, plan_in=plan_in, user=current_user)
+
 
 @router.get("/", response_model=List[plan_schema.ProcurementPlanWithVersions])
 def read_user_procurement_plans(
@@ -37,11 +39,13 @@ def read_user_procurement_plans(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Получить список планов закупок для текущего пользователя со всеми их версиями.
-    """
+    if current_user.role == UserRole.ANALYST_DRVC:
+        # Аналитик ДРВЦ видит все планы
+        return plan_service.get_all_plans(db, skip=skip, limit=limit) 
+        
     plans = plan_service.get_plans_by_user(db, user=current_user, skip=skip, limit=limit)
     return plans
+
 
 @router.get("/{plan_id}", response_model=plan_schema.ProcurementPlanWithFullActiveVersion)
 def read_procurement_plan_with_active_version(
@@ -49,15 +53,15 @@ def read_procurement_plan_with_active_version(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Получить конкретный план по ID с его активной версией и всеми позициями.
-    """
     db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
     if db_plan is None:
         raise HTTPException(status_code=404, detail="План не найден")
-    if db_plan.created_by != current_user.id:
+    
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для доступа к этому плану")
+        
     return db_plan
+
 
 @router.delete("/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_procurement_plan(
@@ -65,21 +69,16 @@ def delete_procurement_plan(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Удалить план закупок.
-    Удаление возможно, только если план никогда не был одобрен.
-    """
     db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
     if db_plan is None:
         raise HTTPException(status_code=404, detail="План не найден")
-    if db_plan.created_by != current_user.id:
+    
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для удаления этого плана")
 
     plan_service.delete_plan(db=db, plan_id=plan_id)
     return {"ok": True}
 
-
-# ========= Эндпоинты для Версий Плана (ProcurementPlanVersion) =========
 
 @router.post("/{plan_id}/versions", response_model=plan_schema.ProcurementPlanVersion)
 def create_new_version(
@@ -87,15 +86,17 @@ def create_new_version(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Создать новую версию (v+1) для редактирования из последней одобренной.
-    Старая версия становится неактивной, новая - активной со статусом DRAFT.
-    """
+    # Аналитик ДРВЦ может создавать версии
+    # if current_user.role == UserRole.ANALYST_DRVC:
+    #      raise HTTPException(status_code=403, detail="Администратор не может создавать версии")
+
     db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
-    if db_plan.created_by != current_user.id:
+    # Аналитик ДРВЦ может работать с любыми планами
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для создания новой версии")
 
     return plan_service.create_new_version_for_editing(db=db, plan_id=plan_id, user=current_user)
+
 
 @router.patch("/{plan_id}/versions/active/status", response_model=plan_schema.ProcurementPlanVersion)
 def update_active_version_status(
@@ -104,11 +105,9 @@ def update_active_version_status(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Обновить статус активной версии плана (DRAFT -> PRE_APPROVED -> APPROVED).
-    """
     db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
-    if db_plan.created_by != current_user.id:
+    
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для изменения статуса")
 
     return plan_service.update_plan_status(db=db, plan_id=plan_id, new_status=status_in.status, user=current_user)
@@ -120,12 +119,9 @@ def delete_latest_plan_version(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Удалить последнюю версию, если она в статусе DRAFT.
-    Предыдущая версия автоматически становится активной.
-    """
     db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
-    if db_plan.created_by != current_user.id:
+    
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для удаления версии")
 
     return plan_service.delete_latest_version(db=db, plan_id=plan_id, user=current_user)
@@ -138,9 +134,9 @@ def export_version_to_excel(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """Экспортировать конкретную версию сметы в Excel."""
     db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
-    if db_plan.created_by != current_user.id:
+    
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для экспорта")
 
     excel_data = plan_exporter.export_plan_to_excel(db, plan_id, version_id)
@@ -151,6 +147,7 @@ def export_version_to_excel(
         headers={'Content-Disposition': f'attachment; filename="plan_{plan_id}_v{version_id}.xlsx"'}
     )
 
+
 @router.get("/{plan_id}/compare", tags=["Versions"])
 def compare_plan_versions(
     plan_id: int,
@@ -159,16 +156,13 @@ def compare_plan_versions(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Сравнить две версии плана и получить список изменений.
-    """
     db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
-    if db_plan.created_by != current_user.id:
+    
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для просмотра этого плана")
         
     return plan_service.compare_versions(db, plan_id, v1_id, v2_id)
 
-# ========= Эндпоинты для Позиций (PlanItem) в контексте Плана =========
 
 @router.post("/{plan_id}/items", response_model=plan_schema.PlanItem, status_code=status.HTTP_201_CREATED)
 def create_plan_item_for_active_version(
@@ -177,26 +171,27 @@ def create_plan_item_for_active_version(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Добавить новую позицию в активную версию сметы.
-    """
+    # Аналитик ДРВЦ может добавлять позиции
+    # if current_user.role == UserRole.ANALYST_DRVC:
+    #      raise HTTPException(status_code=403, detail="Администратор не может добавлять позиции")
+
     db_plan = plan_service.get_plan_with_active_version(db, plan_id=plan_id)
-    if db_plan.created_by != current_user.id:
+    # Аналитик ДРВЦ может работать с любыми планами
+    if current_user.role not in [UserRole.ADMIN, UserRole.ANALYST_DRVC] and db_plan.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав для добавления в эту смету")
 
     return plan_service.add_item_to_plan(db=db, plan_id=plan_id, item_in=item_in, user=current_user)
 
-# ========= Эндпоинты для Импорта =========
 
 @router.get("/template/download", tags=["Import"])
 def download_import_template(db: Session = Depends(get_db)):
-    """Скачать Excel-шаблон для импорта позиций."""
     excel_data = import_service.generate_import_template(db)
     return StreamingResponse(
         io.BytesIO(excel_data),
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition': 'attachment; filename="import_template.xlsx"'}
     )
+
 
 @router.post("/{plan_id}/import", tags=["Import"])
 def import_items_from_file(
@@ -206,11 +201,12 @@ def import_items_from_file(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Импортировать позиции из Excel файла в активную версию плана.
-    Импорт выполняется в фоновом режиме.
-    """
+    # Аналитик ДРВЦ может импортировать данные
+    # if current_user.role == UserRole.ANALYST_DRVC:
+    #      raise HTTPException(status_code=403, detail="Администратор не может импортировать данные")
+         
     return import_service.process_import_file(db=db, plan_id=plan_id, file=file, user=current_user, background_tasks=background_tasks)
+
 
 @router.post("/import-kenml-template", tags=["Import"])
 def import_kenml_and_generate_template(
@@ -218,9 +214,6 @@ def import_kenml_and_generate_template(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Парсит KENML/ZIP файл, ищет соответствия и возвращает заполненный Excel-шаблон.
-    """
     excel_data = import_service.process_kenml_import(db=db, file=file)
     return StreamingResponse(
         io.BytesIO(excel_data),

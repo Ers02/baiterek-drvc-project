@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { 
+import type {
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
     NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
     Execution, ExecutionPayload, KtpSupplier
@@ -75,7 +75,7 @@ export const exportVersionToExcel = async (planId: number, versionId: number): P
   link.remove();
 };
 
-export const compareVersions = (planId: number, v1Id: number, v2Id: number): Promise<any> => 
+export const compareVersions = (planId: number, v1Id: number, v2Id: number): Promise<any> =>
     api.get(`/plans/${planId}/compare`, { params: { v1_id: v1Id, v2_id: v2Id } }).then(res => res.data);
 
 // --- API для Позиций Плана (PlanItem) ---
@@ -150,11 +150,74 @@ export const importKenmlTemplate = (file: File): Promise<void> => {
     });
 };
 
+// --- Admin API ---
+export const adminGetUsers = (): Promise<any[]> => api.get('/admin/users').then(res => res.data);
+export const adminGetPlans = (): Promise<any[]> => api.get('/admin/plans').then(res => res.data);
+
+export const adminAnalyzePsd = (file: File): Promise<{ task_id: string; message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/admin/analyze-psd', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(res => res.data);
+};
+
+export const getAdminTaskStatus = (taskId: string): Promise<{ status: string; message: string; error?: string }> =>
+    api.get(`/admin/tasks/${taskId}`).then(res => res.data);
+
+export const downloadAdminTaskResult = async (taskId: string): Promise<void> => {
+    const response = await api.get(`/admin/tasks/${taskId}/result`, { responseType: 'blob' });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `analysis_result_${taskId}.xlsx`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+};
+
+export const getExternalDocs = (): Promise<any[]> => api.get('/admin/external/documents').then(res => res.data);
+
+export const uploadExternalDoc = (file: File, docType: string, bankName: string, receivedAt: string, notes: string): Promise<any> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('doc_type', docType);
+    formData.append('bank_name', bankName);
+    formData.append('received_at', receivedAt);
+    if (notes) formData.append('notes', notes);
+    return api.post('/admin/external/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(res => res.data);
+};
+
+export const sendExternalResponse = (docId: number): Promise<any> => api.post(`/admin/external/${docId}/send-response`).then(res => res.data);
+
+export const downloadExternalSource = async (docId: number, fileName: string): Promise<void> => {
+    const response = await api.get(`/admin/external/${docId}/download`, { responseType: 'blob' });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+};
+
+export const uploadEstimateTemplate = (file: File): Promise<{ message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/admin/upload-estimate-template', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(res => res.data);
+};
+
+export const getEstimateAnalysis = (): Promise<any> => api.get('/admin/estimate-analysis').then(res => res.data);
+
 
 export default api;
 export { PlanStatus };
-export type { 
+export type {
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
     NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
     Execution, ExecutionPayload, KtpSupplier
-};
+}
