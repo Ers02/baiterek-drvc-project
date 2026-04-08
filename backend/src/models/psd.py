@@ -50,36 +50,20 @@ class PsdDocumentItem(Base):
         Index('idx_psd_items_code_sn', 'code_sn'),
     )
 
-class AgskEnstruExclusive(Base):
-    __tablename__ = "agsk_enstru_exclusive"
-    id = Column(Integer, primary_key=True)
-    agsk_code = Column(String(50), unique=True, nullable=False, index=True)
-    enstru_code = Column(String(35), unique=True, nullable=False, index=True)
-    name_ru_agsk = Column(Text, nullable=True)
-    agsk_full_name = Column(Text, nullable=True)
-    name_ru_enstru = Column(Text, nullable=True)
-    detail_enstru = Column(Text, nullable=True)
-    standard_enstru = Column(Text, nullable=True)
-    score = Column(Integer, nullable=True)
-    reason = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-class AgskEnstruManualMatch(Base):
-    """Справочник замен: связь AGSK с несколькими ЕНСТРУ/КТП товарами"""
-    __tablename__ = "agsk_enstru_manual_matches"
+class AgskReestrKtpMatch(Base):
+    """Библиотека замен: связь AGSK с несколькими товарами из Реестра КТП"""
+    __tablename__ = "agsk_reestr_ktp_matches"
     id = Column(Integer, primary_key=True)
     agsk_code = Column(String(50), nullable=False, index=True)
     enstru_code = Column(String(35), ForeignKey("enstru.code"), nullable=False, index=True)
     
-    # Ссылка на конкретный товар в реестре КТП (может быть пустым, если привязан только код ЕНСТРУ)
-    ktp_id = Column(Integer, ForeignKey("reestr_ktp.id"), nullable=True)
+    ktp_id = Column(Integer, ForeignKey("reestr_ktp.id"), nullable=False)
     
     source = Column(String(20), default="manual")
     agsk_name_ru = Column(Text, nullable=True)
     enstru_name_ru = Column(Text, nullable=True)
-    product_name_ktp = Column(Text, nullable=True) # Название конкретного товара из КТП
+    product_name_ktp = Column(Text, nullable=True)
     
-    # Доля внутристрановой ценности для выбора "минимальной"
     dvc_percent = Column(Numeric(5, 2), nullable=True)
     
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -88,8 +72,8 @@ class AgskEnstruManualMatch(Base):
     is_active = Column(Boolean, default=True)
     
     __table_args__ = (
-        # Теперь уникальность по тройке: АГСК + ЕНСТРУ + ТОВАР КТП
-        UniqueConstraint('agsk_code', 'enstru_code', 'ktp_id', name='uq_agsk_enstru_ktp_manual'),
+        # Переименовал индекс для избежания конфликта в Postgres
+        UniqueConstraint('agsk_code', 'enstru_code', 'ktp_id', name='uq_agsk_reestr_ktp_manual_v2'),
     )
 
 class PsdAnalysisSession(Base):

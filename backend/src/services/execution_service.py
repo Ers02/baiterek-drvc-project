@@ -3,175 +3,94 @@ from sqlalchemy import func
 from fastapi import HTTPException, status
 from ..models import models
 from ..schemas import execution_schema
-from . import plan_service
+from .plan_service import PlanService
 
-def _recalculate_item_execution_status(db: Session, item_id: int):
-    """
-    Пересчитывает исполненное количество и сумму для позиции плана.
-    """
-    item = db.query(models.PlanItemVersion).filter(models.PlanItemVersion.id == item_id).first()
-    if not item:
-        return
+class ExecutionService:
+    """Сервис для управления исполнением планов закупок (отчетность)"""
 
-    # ИЗМЕНЕНО: Считаем исполнение по supply_volume_physical (фактическая поставка)
-    contracted_quantity = db.query(func.sum(models.PlanItemExecution.supply_volume_physical)).filter(
-        models.PlanItemExecution.plan_item_id == item_id
-    ).scalar() or 0
-    
-    # ИЗМЕНЕНО: Считаем исполнение по supply_volume_value (фактическая сумма поставки)
-    contracted_amount = db.query(func.sum(models.PlanItemExecution.supply_volume_value)).filter(
-        models.PlanItemExecution.plan_item_id == item_id
-    ).scalar() or 0
+    @staticmethod
+    def _recalculate_item_status(db: Session, item_id: int):
+        """Пересчет исполненных показателей для позиции"""
+        item = db.query(models.PlanItemVersion).filter(models.PlanItemVersion.id == item_id).first()
+        if not item: return
 
-    executed_vc_amount = db.query(func.sum(models.PlanItemExecution.fact_vc_amount)).filter(
-        models.PlanItemExecution.plan_item_id == item_id
-    ).scalar() or 0
-    
-    item.executed_quantity = contracted_quantity
-    item.executed_amount = contracted_amount
-    item.executed_vc_amount = executed_vc_amount
-    db.commit()
+        stats = db.query(
+            func.sum(models.PlanItemExecution.supply_volume_physical),
+            func.sum(models.PlanItemExecution.supply_volume_value),
+            func.sum(models.PlanItemExecution.fact_vc_amount)
+        ).filter(models.PlanItemExecution.plan_item_id == item_id).first()
 
-def _check_and_update_plan_execution_status(db: Session, version_id: int):
-    """
-    Проверяет, полностью ли исполнен план (все позиции закрыты отчетами).
-    Если да, устанавливает is_executed = True.
-    """
-    version = db.query(models.ProcurementPlanVersion).filter(models.ProcurementPlanVersion.id == version_id).first()
-    if not version:
-        return
-
-    # Получаем все НЕ удаленные позиции плана
-    items = db.query(models.PlanItemVersion).filter(
-        models.PlanItemVersion.version_id == version_id,
-        models.PlanItemVersion.is_deleted == False
-    ).all()
-
-    if not items:
-        version.is_executed = False
+        item.executed_quantity = stats[0] or 0
+        item.executed_amount = stats[1] or 0
+        item.executed_vc_amount = stats[2] or 0
         db.commit()
-        return
 
-    all_items_executed = True
-    for item in items:
-        # Используем уже обновленное поле executed_quantity
-        if item.executed_quantity < item.quantity:
-            all_items_executed = False
-            break
-    
-    version.is_executed = all_items_executed
-    db.commit()
+    @staticmethod
+    def _check_plan_completion(db: Session, version_id: int):
+        """Проверка полной реализации плана"""
+        version = db.query(models.ProcurementPlanVersion).filter(models.ProcurementPlanVersion.id == version_id).first()
+        if not version: return
 
-def create_execution(db: Session, execution_in: execution_schema.ExecutionCreate, user: models.User) -> models.PlanItemExecution:
-    # Проверяем существование позиции плана
-    plan_item = db.query(models.PlanItemVersion).filter(models.PlanItemVersion.id == execution_in.plan_item_id).first()
-    if not plan_item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Позиция плана не найдена")
+        items = db.query(models.PlanItemVersion).filter(
+            models.PlanItemVersion.version_id == version_id,
+            models.PlanItemVersion.is_deleted == False
+        ).all()
 
-    # Проверяем права доступа
-    if plan_item.version.plan.created_by != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав для добавления отчета к этой позиции")
+        if not items:
+            version.is_executed = False
+        else:
+            # План исполнен, если все позиции закрыты по количеству
+            version.is_executed = all(i.executed_quantity >= i.quantity for i in items)
+        
+        db.commit()
 
-    # Проверяем статус плана
-    if plan_item.version.status != models.PlanStatus.APPROVED:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Отчеты можно добавлять только к утвержденным планам")
+    @classmethod
+    def create_execution(cls, db: Session, execution_in: execution_schema.ExecutionCreate, user: models.User):
+        item = db.query(models.PlanItemVersion).filter(models.PlanItemVersion.id == execution_in.plan_item_id).first()
+        if not item or item.version.plan.created_by != user.id:
+            raise HTTPException(status_code=403, detail="Доступ запрещен")
 
-    # --- ВАЛИДАЦИЯ ЦЕНЫ ЗА ЕДИНИЦУ ---
-    if execution_in.contract_price_per_unit > plan_item.price_per_unit:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Цена за единицу ({execution_in.contract_price_per_unit}) превышает плановую ({plan_item.price_per_unit})"
+        if item.version.status != models.PlanStatus.APPROVED:
+            raise HTTPException(status_code=400, detail="План не утвержден")
+
+        # Валидация цен
+        if execution_in.contract_price_per_unit > item.price_per_unit:
+            raise HTTPException(status_code=400, detail="Цена превышает плановую")
+
+        # Создание записи
+        fact_vc_amount = execution_in.supply_volume_value * (execution_in.fact_vc_percentage / 100)
+        db_exec = models.PlanItemExecution(
+            **execution_in.model_dump(exclude={'fact_vc_amount'}),
+            contract_sum=execution_in.contract_quantity * execution_in.contract_price_per_unit,
+            fact_vc_amount=fact_vc_amount
         )
+        db.add(db_exec)
+        db.commit()
+        db.refresh(db_exec)
 
-    # --- ВАЛИДАЦИЯ КОЛИЧЕСТВА (по ФАКТУ ПОСТАВКИ) ---
-    # Изменено: проверяем supply_volume_physical вместо contract_quantity
-    total_executed_quantity = db.query(func.sum(models.PlanItemExecution.supply_volume_physical)).filter(
-        models.PlanItemExecution.plan_item_id == execution_in.plan_item_id
-    ).scalar() or 0
+        # Синхронизация статусов
+        cls._recalculate_item_status(db, item.id)
+        cls._check_plan_completion(db, item.version_id)
+        PlanService.recalculate_metrics(db, item.version_id)
 
-    new_total_quantity = total_executed_quantity + execution_in.supply_volume_physical
+        return db_exec
 
-    if new_total_quantity > plan_item.quantity:
-        remaining_quantity = plan_item.quantity - total_executed_quantity
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Превышено плановое количество (по факту поставки). Осталось: {remaining_quantity}, вы пытаетесь добавить: {execution_in.supply_volume_physical}"
-        )
-    
-    # Рассчитываем сумму текущего договора
-    current_contract_sum = execution_in.contract_quantity * execution_in.contract_price_per_unit
+    @staticmethod
+    def get_executions_by_item(db: Session, item_id: int, user: models.User):
+        return db.query(models.PlanItemExecution).filter(models.PlanItemExecution.plan_item_id == item_id).all()
 
-    # ВЦ считается от фактической суммы поставки
-    fact_vc_amount = execution_in.supply_volume_value * (execution_in.fact_vc_percentage / 100)
+    @classmethod
+    def delete_execution(cls, db: Session, execution_id: int, user: models.User):
+        db_exec = db.query(models.PlanItemExecution).filter(models.PlanItemExecution.id == execution_id).first()
+        if not db_exec: return False
+        
+        item_id = db_exec.plan_item_id
+        version_id = db_exec.plan_item.version_id
+        
+        db.delete(db_exec)
+        db.commit()
 
-    # --- ВАЛИДАЦИЯ СУММЫ (по ФАКТУ ПОСТАВКИ) ---
-    # Изменено: проверяем supply_volume_value вместо contract_sum
-    total_executed_sum = db.query(func.sum(models.PlanItemExecution.supply_volume_value)).filter(
-        models.PlanItemExecution.plan_item_id == execution_in.plan_item_id
-    ).scalar() or 0
-
-    new_total_sum = total_executed_sum + execution_in.supply_volume_value
-
-    if new_total_sum > plan_item.total_amount:
-        remaining_sum = plan_item.total_amount - total_executed_sum
-        if new_total_sum - plan_item.total_amount > 0.01:
-             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Превышена плановая сумма (по факту поставки). Осталось: {remaining_sum}, вы пытаетесь добавить: {execution_in.supply_volume_value}"
-            )
-    # --- КОНЕЦ ВАЛИДАЦИИ ---
-
-    db_execution = models.PlanItemExecution(
-        **execution_in.model_dump(exclude={'fact_vc_amount'}),
-        contract_sum=current_contract_sum,
-        fact_vc_amount=fact_vc_amount
-    )
-    db.add(db_execution)
-    db.commit()
-    db.refresh(db_execution)
-    
-    # Обновляем статус исполнения позиции
-    _recalculate_item_execution_status(db, plan_item.id)
-    
-    # Обновляем статус исполнения плана
-    _check_and_update_plan_execution_status(db, plan_item.version_id)
-
-    # Пересчитываем метрики версии (включая executed_vc_amount)
-    plan_service._recalculate_version_metrics(db, plan_item.version_id)
-
-    return db_execution
-
-def get_executions_by_item(db: Session, plan_item_id: int, user: models.User) -> list[models.PlanItemExecution]:
-    plan_item = db.query(models.PlanItemVersion).filter(models.PlanItemVersion.id == plan_item_id).first()
-    if not plan_item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Позиция плана не найдена")
-    
-    if plan_item.version.plan.created_by != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав для просмотра отчетов этой позиции")
-
-    return db.query(models.PlanItemExecution).filter(models.PlanItemExecution.plan_item_id == plan_item_id).all()
-
-def delete_execution(db: Session, execution_id: int, user: models.User):
-    execution = db.query(models.PlanItemExecution).filter(models.PlanItemExecution.id == execution_id).first()
-    if not execution:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Запись об исполнении не найдена")
-
-    if execution.plan_item.version.plan.created_by != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав для удаления этого отчета")
-
-    version_id = execution.plan_item.version_id
-    plan_item_id = execution.plan_item_id
-    
-    db.delete(execution)
-    db.commit()
-    
-    # Обновляем статус исполнения позиции
-    _recalculate_item_execution_status(db, plan_item_id)
-    
-    # Обновляем статус исполнения плана
-    _check_and_update_plan_execution_status(db, version_id)
-
-    # Пересчитываем метрики версии (включая executed_vc_amount)
-    plan_service._recalculate_version_metrics(db, version_id)
-
-    return True
+        cls._recalculate_item_status(db, item_id)
+        cls._check_plan_completion(db, version_id)
+        PlanService.recalculate_metrics(db, version_id)
+        return True

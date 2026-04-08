@@ -1,27 +1,27 @@
-from ..models import models
+from ..models.plan import NeedType
 
-def get_need_type_by_typename(type_name: str | None) -> models.NeedType:
+def get_need_type_by_typename(type_name: str | None) -> NeedType:
     """
     Определяет тип потребности (NeedType) на основе строкового типа из ЕНС ТРУ.
     """
     if not type_name:
-        return models.NeedType.GOODS
+        return NeedType.GOODS
         
     type_name_upper = type_name.upper().strip()
     
     need_type_map = {
-        'GOOD': models.NeedType.GOODS,
-        'GOODS': models.NeedType.GOODS,
-        'WORK': models.NeedType.WORKS,
-        'WORKS': models.NeedType.WORKS,
-        'SERVICE': models.NeedType.SERVICES,
-        'SERVICES': models.NeedType.SERVICES
+        'GOOD': NeedType.GOODS,
+        'GOODS': NeedType.GOODS,
+        'WORK': NeedType.WORKS,
+        'WORKS': NeedType.WORKS,
+        'SERVICE': NeedType.SERVICES,
+        'SERVICES': NeedType.SERVICES
     }
-    return need_type_map.get(type_name_upper, models.NeedType.GOODS)
+    return need_type_map.get(type_name_upper, NeedType.GOODS)
 
 def is_smr(expense_item_id: int | None) -> bool:
     """
-    Проверяет, является ли статья затрат СМР (Строительно-монтажные работы).
+    Проверяет, является ли статья затрат СМР.
     ID СМР = 1.
     """
     return expense_item_id == 1

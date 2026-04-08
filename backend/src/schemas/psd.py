@@ -1,14 +1,25 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
+
+class AgskLibraryItemSchema(BaseModel):
+    id: int
+    agsk_code: str
+    enstru_code: str
+    enstru_name_ru: Optional[str] = None
+    product_name_ktp: Optional[str] = None
+    dvc_percent: Optional[float] = None
+    source: str
+    is_active: bool
+    
+    model_config = ConfigDict(from_attributes=True)
 
 class ManualMatchCreate(BaseModel):
     agsk_code: str
     enstru_code: str
     doc_id: Optional[int] = None
-    ktp_id: Optional[int] = None
-    source: str = "manual"
+    ktp_id: int
     product_name_ktp: Optional[str] = None
     dvc_percent: Optional[float] = None
 
@@ -23,8 +34,7 @@ class ExternalDocumentSchema(BaseModel):
     assigned_to: Optional[int] = None
     assigned_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PsdDocumentItemSchema(BaseModel):
     id: int
@@ -36,12 +46,18 @@ class PsdDocumentItemSchema(BaseModel):
     volume: float
     price: float
     total_amount: float
-    category: Optional[str] = None
     enstru_code: Optional[str] = None
     enstru_name: Optional[str] = None
     match_type: str
     match_score: Optional[int] = None
     match_reason: Optional[str] = None
+    agsk_name_ru: Optional[str] = None # Добавлено
+    agsk_full_name: Optional[str] = None # Добавлено
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+class PsdItemsResponse(BaseModel):
+    items: List[PsdDocumentItemSchema]
+    total: int
+    skip: int
+    limit: int

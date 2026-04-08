@@ -1,57 +1,42 @@
-from functools import lru_cache
+from sqlalchemy.orm import Session
 from ..models import models
-from ..database.database import SessionLocal
+from typing import List, Optional, Any
 
+class DictionaryService:
+    """Сервис для управления справочниками (MKEI, Cost Items, AGSK и т.д.)"""
 
-@lru_cache(maxsize=1)
-def get_mkei_map():
-    """Возвращает словарь {code: id} для МКЕИ."""
-    db = SessionLocal()
-    try:
-        items = db.query(models.Mkei.code, models.Mkei.id).all()
-        return {code: id for code, id in items}
-    finally:
-        db.close()
+    @staticmethod
+    def get_list(db: Session, model: Any, query: Optional[str] = None, search_fields: List[str] = None, limit: int = 50):
+        """Универсальный метод получения списка с поиском"""
+        db_query = db.query(model)
+        if query and search_fields:
+            filters = [getattr(model, field).ilike(f"%{query}%") for field in search_fields]
+            db_query = db_query.filter(models.or_(*filters))
+        return db_query.limit(limit).all()
 
+    @staticmethod
+    def create_item(db: Session, model: Any, data: dict):
+        item = model(**data)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
 
-@lru_cache(maxsize=1)
-def get_cost_item_map():
-    """Возвращает словарь {id: id} для проверки существования статьи затрат."""
-    db = SessionLocal()
-    try:
-        items = db.query(models.Cost_Item.id).all()
-        return {id: id for id, in items}
-    finally:
-        db.close()
+    @staticmethod
+    def update_item(db: Session, model: Any, item_id: int, data: dict):
+        item = db.query(model).filter(model.id == item_id).first()
+        if item:
+            for key, value in data.items():
+                setattr(item, key, value)
+            db.commit()
+            db.refresh(item)
+        return item
 
-
-@lru_cache(maxsize=1)
-def get_kato_map():
-    """Возвращает словарь {code: id} для КАТО."""
-    db = SessionLocal()
-    try:
-        items = db.query(models.Kato.code, models.Kato.id).all()
-        return {code: id for code, id in items}
-    finally:
-        db.close()
-
-
-# @lru_cache(maxsize=1) # REMOVED: Caching was causing issues with outdated data
-def get_agsk_map():
-    """Возвращает словарь {code: code} для АГСК. Данные всегда свежие."""
-    db = SessionLocal()
-    try:
-        # Filter out null or empty codes
-        items = db.query(models.Agsk.code).filter(models.Agsk.code.isnot(None), models.Agsk.code != '').all()
-        return {code: code for code, in items}
-    finally:
-        db.close()
-
-
-def clear_cache():
-    """Очищает кэш (вызывать при обновлении справочников)."""
-    get_mkei_map.cache_clear()
-    get_cost_item_map.cache_clear()
-    get_kato_map.cache_clear()
-    # get_agsk_map is no longer cached, so no need to clear
-    # get_agsk_map.cache_clear()
+    @staticmethod
+    def delete_item(db: Session, model: Any, item_id: int):
+        item = db.query(model).filter(model.id == item_id).first()
+        if item:
+            db.delete(item)
+            db.commit()
+            return True
+        return False
