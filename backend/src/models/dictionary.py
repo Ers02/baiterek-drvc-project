@@ -21,7 +21,7 @@ class Agsk(Base):
     __tablename__ = "agsk"
     id = Column(Integer, primary_key=True)
     group = Column(Text, nullable=True)
-    code = Column(Text, nullable=True)
+    code = Column(Text, unique=True, nullable=True) # Добавлено unique=True
     name_ru = Column(Text, nullable=True)
     full_name = Column(Text, nullable=True)
     standart = Column(Text, nullable=True)

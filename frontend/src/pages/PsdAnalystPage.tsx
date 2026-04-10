@@ -15,7 +15,8 @@ import {
   QrCode as AgskIcon,
   Category as CategoryIcon,
   InfoOutlined as InfoIcon,
-  LibraryBooks as LibraryIcon
+  LibraryBooks as LibraryIcon,
+  FileDownload as FileDownloadIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n';
 import Header from '../components/Header';
@@ -104,6 +105,7 @@ const PsdAnalystPage: React.FC = () => {
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
   const [listLoading, setListLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingMatch, setEditingMatch] = useState<AgskMatch | null>(null);
@@ -207,7 +209,7 @@ const PsdAnalystPage: React.FC = () => {
     } finally { setReestrLoading(false); }
   };
 
-  const addToLibrary = async (item: any, type: 'rec' | 'ktp') => {
+  const addToLibrary = async (item: ReestrResult, type: 'rec' | 'ktp') => {
     if (!editingMatch) return;
     await api.post('/psd-analyst/manual-match', {
       agsk_code: editingMatch.code_sn,
@@ -221,6 +223,10 @@ const PsdAnalystPage: React.FC = () => {
     setLibrary(libRes.data);
     loadArchive();
     loadMatches(selectedDoc.id);
+
+    // Remove the added item from recommendations and reestrResults
+    setRecommendations(prev => prev.filter(rec => !(rec.enstru_code === item.enstru_code && rec.ktp_id === item.ktp_id)));
+    setReestrResults(prev => prev.filter(res => !(res.enstru_code === item.enstru_code && res.ktp_id === item.ktp_id)));
   };
 
   const removeFromLibrary = async (id: number) => {
@@ -233,16 +239,38 @@ const PsdAnalystPage: React.FC = () => {
     if (selectedDoc) loadMatches(selectedDoc.id);
   };
 
-  const handleExportExcel = (format: string) => {
-    api.get('/psd-analyst/export-matches', { params: { format_type: format }, responseType: 'blob' })
-      .then(r => {
-        const url = window.URL.createObjectURL(new Blob([r.data]));
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `library_${format}.xlsx`);
-        document.body.appendChild(link);
-        link.click();
+  const handleExportFullReport = async (docId?: number) => {
+    setExportLoading(true);
+    try {
+      const response = await api.get('/psd-analyst/export-full-report', {
+        params: { doc_id: docId },
+        responseType: 'blob'
       });
+      
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = docId ? `psd_report_doc_${docId}.xlsx` : 'psd_full_report.xlsx';
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1];
+        }
+      }
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Ошибка при выгрузке отчета');
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   const getMatchTypeStyles = (type: string) => {
@@ -267,9 +295,9 @@ const PsdAnalystPage: React.FC = () => {
     if (!codes.length) return null;
     return (
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
-        {codes.slice(0, 6).map((code, i) => {
+        {codes.map((code, i) => {
           const name = names[i] || '';
-          const isMatch = highlight && code.startsWith(highlight);
+          const isMatch = highlight && code.toLowerCase().includes(highlight.toLowerCase()); // Use includes for broader highlighting
           return (
             <Tooltip key={code} title={name || code} arrow placement="top">
               <Chip
@@ -292,13 +320,6 @@ const PsdAnalystPage: React.FC = () => {
             </Tooltip>
           );
         })}
-        {codes.length > 6 && (
-          <Chip
-            label={`+${codes.length - 6}`}
-            size="small"
-            sx={{ height: 20, fontSize: '0.6rem', bgcolor: '#f5f5f5', color: '#9e9e9e' }}
-          />
-        )}
       </Box>
     );
   };
@@ -318,9 +339,15 @@ const PsdAnalystPage: React.FC = () => {
               sx={{ bgcolor: 'white', textTransform: 'none' }}>
               Обновить
             </Button>
-            <Button size="small" variant="contained" startIcon={<DownloadIcon />}
-              onClick={() => handleExportExcel('full')} sx={{ textTransform: 'none' }}>
-              Экспорт
+            <Button 
+              size="small" 
+              variant="contained" 
+              startIcon={exportLoading ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+              disabled={exportLoading}
+              onClick={() => handleExportFullReport()} 
+              sx={{ textTransform: 'none' }}
+            >
+              Экспорт всех
             </Button>
           </Stack>
         </Box>
@@ -394,6 +421,18 @@ const PsdAnalystPage: React.FC = () => {
                     onClick={() => { setOnlyUnmatched(!onlyUnmatched); setPage(1); }}>
                     Несопоставленные
                   </Button>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color="success"
+                    startIcon={exportLoading ? <CircularProgress size={16} color="inherit" /> : <FileDownloadIcon />}
+                    disabled={exportLoading}
+                    onClick={() => handleExportFullReport(selectedDoc.id)}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    Выгрузить отчет
+                  </Button>
                 </>
               )}
             </Paper>
@@ -434,12 +473,19 @@ const PsdAnalystPage: React.FC = () => {
                         <Highlight text={m.code_sn} search={debouncedAgskSearch} />
                       </TableCell>
                       <TableCell sx={{ color: 'primary.main', fontWeight: 'bold' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {m.enstru_code || '—'}
-                          {m.match_reason && (
-                            <Tooltip title={m.match_reason}>
-                              <InfoIcon sx={{ fontSize: 14, color: '#90a4ae', cursor: 'help' }} />
-                            </Tooltip>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            {m.enstru_code || '—'}
+                            {m.match_reason && (
+                              <Tooltip title={m.match_reason}>
+                                <InfoIcon sx={{ fontSize: 14, color: '#90a4ae', cursor: 'help' }} />
+                              </Tooltip>
+                            )}
+                          </Box>
+                          {(m.match_type === 'auto' || m.match_type === 'auto_ktp') && m.match_reason && (
+                            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', lineHeight: 1.2 }}>
+                              {m.match_reason}
+                            </Typography>
                           )}
                         </Box>
                       </TableCell>
@@ -751,7 +797,7 @@ const PsdAnalystPage: React.FC = () => {
                                 codes={r.agsk3_codes}
                                 names={r.agsk3_names}
                                 highlight={
-                                  searchMode === 'agsk' ? debouncedReestrSearch : editingMatch?.code_sn
+                                  (searchMode === 'agsk' || searchMode === 'all') ? debouncedReestrSearch : editingMatch?.code_sn
                                 }
                               />
                             </Box>

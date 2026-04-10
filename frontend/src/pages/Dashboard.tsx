@@ -82,8 +82,8 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
     }
   };
 
-  const activeVersion = plan.versions.find(v => v.is_active);
-  const canDeletePlan = !plan.versions.some(v => v.status !== PlanStatus.DRAFT);
+  const activeVersion = plan.versions?.find(v => v.is_active);
+  const canDeletePlan = !plan.versions?.some(v => v.status !== PlanStatus.DRAFT);
   const isExecuted = activeVersion?.is_executed || false;
 
   return (
@@ -144,7 +144,7 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
                 </Tooltip>
             )}
 
-            {activeVersion?.status === PlanStatus.DRAFT && activeVersion.version_number > 1 && (
+            {activeVersion?.status === PlanStatus.DRAFT && (activeVersion?.version_number || 0) > 1 && (
                 <Tooltip title={t('delete_draft_version_tooltip')}>
                 <IconButton size="small" color="secondary" onClick={handleDeleteLatest}>
                     <RestoreFromTrashIcon />
@@ -178,7 +178,7 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {plan.versions.map((version) => (
+                  {plan.versions?.map((version) => (
                     <TableRow key={version.id}>
                       <TableCell>
                         <Typography variant="body2" fontWeight={version.is_active ? "bold" : "normal"}>
@@ -301,7 +301,7 @@ export default function Dashboard() {
     if (currentTab === 0) return filtered;
 
     return filtered.filter(plan => {
-        const activeVersion = plan.versions.find(v => v.is_active);
+        const activeVersion = plan.versions?.find(v => v.is_active);
         if (!activeVersion) return false;
 
         if (currentTab === 4) return activeVersion.is_executed;

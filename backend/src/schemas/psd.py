@@ -10,7 +10,7 @@ class AgskLibraryItemSchema(BaseModel):
     enstru_name_ru: Optional[str] = None
     product_name_ktp: Optional[str] = None
     dvc_percent: Optional[float] = None
-    source: str
+    # source: str # Удалено, так как в модели может не быть этого поля напрямую
     is_active: bool
     
     model_config = ConfigDict(from_attributes=True)
@@ -19,7 +19,7 @@ class ManualMatchCreate(BaseModel):
     agsk_code: str
     enstru_code: str
     doc_id: Optional[int] = None
-    ktp_id: int
+    ktp_id: Optional[int] = None # Изменено на Optional
     product_name_ktp: Optional[str] = None
     dvc_percent: Optional[float] = None
 
@@ -51,8 +51,8 @@ class PsdDocumentItemSchema(BaseModel):
     match_type: str
     match_score: Optional[int] = None
     match_reason: Optional[str] = None
-    agsk_name_ru: Optional[str] = None # Добавлено
-    agsk_full_name: Optional[str] = None # Добавлено
+    agsk_name_ru: Optional[str] = None
+    agsk_full_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
