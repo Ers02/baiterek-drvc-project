@@ -16,7 +16,8 @@ import {
   Category as CategoryIcon,
   InfoOutlined as InfoIcon,
   LibraryBooks as LibraryIcon,
-  FileDownload as FileDownloadIcon
+  FileDownload as FileDownloadIcon,
+  Description as DescriptionIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n';
 import Header from '../components/Header';
@@ -106,6 +107,7 @@ const PsdAnalystPage: React.FC = () => {
   const [listLoading, setListLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [docxLoading, setDocxLoading] = useState(false);
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingMatch, setEditingMatch] = useState<AgskMatch | null>(null);
@@ -273,6 +275,29 @@ const PsdAnalystPage: React.FC = () => {
     }
   };
 
+  const handleDownloadConclusion = async (docId: number) => {
+    setDocxLoading(true);
+    try {
+      const response = await api.get(`/psd-analyst/documents/${docId}/conclusion`, {
+        responseType: 'blob'
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Заключение_ПСД_${docId}.docx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download conclusion failed:', error);
+      alert('Ошибка при генерации заключения');
+    } finally {
+      setDocxLoading(false);
+    }
+  };
+
   const getMatchTypeStyles = (type: string) => {
     switch (type) {
       case 'manual_ktp': return { label: 'КТП + Библиотека', color: 'primary' };
@@ -422,17 +447,30 @@ const PsdAnalystPage: React.FC = () => {
                     Несопоставленные
                   </Button>
                   <Box sx={{ flexGrow: 1 }} />
-                  <Button
-                    size="small"
-                    variant="contained"
-                    color="success"
-                    startIcon={exportLoading ? <CircularProgress size={16} color="inherit" /> : <FileDownloadIcon />}
-                    disabled={exportLoading}
-                    onClick={() => handleExportFullReport(selectedDoc.id)}
-                    sx={{ textTransform: 'none' }}
-                  >
-                    Выгрузить отчет
-                  </Button>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="secondary"
+                      startIcon={docxLoading ? <CircularProgress size={16} color="inherit" /> : <DescriptionIcon />}
+                      disabled={docxLoading}
+                      onClick={() => handleDownloadConclusion(selectedDoc.id)}
+                      sx={{ textTransform: 'none' }}
+                    >
+                      Заключение (DOCX)
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="success"
+                      startIcon={exportLoading ? <CircularProgress size={16} color="inherit" /> : <FileDownloadIcon />}
+                      disabled={exportLoading}
+                      onClick={() => handleExportFullReport(selectedDoc.id)}
+                      sx={{ textTransform: 'none' }}
+                    >
+                      Выгрузить отчет
+                    </Button>
+                  </Stack>
                 </>
               )}
             </Paper>

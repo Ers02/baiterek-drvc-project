@@ -17,7 +17,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 def verify_password(plain_password, hashed_password):
     if not hashed_password:
         return False
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
 
 
 def get_password_hash(password):
@@ -42,10 +45,7 @@ def authenticate_user(db: Session, iin: str, password: str) -> Optional[User]:
     user = db.query(User).filter(User.iin == iin).first()
     if not user:
         return None
-        
-    if not user.hashed_password:
-        return user
-        
+
     if not verify_password(password, user.hashed_password):
         return None
         

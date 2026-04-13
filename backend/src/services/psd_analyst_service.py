@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, String, desc, text, cast, case
 from typing import List, Optional, Dict, Any, Literal
@@ -5,6 +7,9 @@ from datetime import datetime, timezone
 import pandas as pd
 import os
 import re
+from docx import Document
+from docx.shared import Pt, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from ..models.models import (
     AgskReestrKtpMatch, PsdDocumentItem,
@@ -438,249 +443,326 @@ class PsdAnalystService:
         return {"file_path": path}
 
     def export_full_analysis_report(self, db: Session, doc_id: Optional[int] = None) -> Optional[str]:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        from decimal import Decimal
+        from datetime import datetime
+        import os
+        import re
+        from collections import defaultdict
+
         # ── 1. Загружаем позиции документа ───────────────────────────────────
         q = db.query(PsdDocumentItem, Agsk).outerjoin(Agsk, PsdDocumentItem.code_sn == Agsk.code)
         if doc_id:
             q = q.filter(PsdDocumentItem.document_id == doc_id)
-        items = q.order_by(PsdDocumentItem.id).all()
+        items_data = q.order_by(PsdDocumentItem.id).all()
 
-        if not items:
+        if not items_data:
             return None
 
-        agsk_codes = list({item.code_sn for item, _ in items if item.code_sn})
+        doc = None
+        if doc_id:
+            doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
 
-        # ── 2. Библиотека замен: agsk_code -> [AgskReestrKtpMatch] ───────────
-        from collections import defaultdict
-        library_map: dict[str, list] = defaultdict(list)
-        ktp_ids_lib: set[int] = set()
+        agsk_codes = list({item.code_sn for item, _ in items_data if item.code_sn})
+        enstru_codes_set = list({item.enstru_code for item, _ in items_data if item.enstru_code})
 
+        # ── 2. Библиотека замен ───────────────────
+        library_map = defaultdict(list)
         if agsk_codes:
-            lib_rows = (
-                db.query(AgskReestrKtpMatch)
-                .filter(
-                    AgskReestrKtpMatch.agsk_code.in_(agsk_codes),
-                    AgskReestrKtpMatch.is_active == True,
-                )
-                .all()
-            )
+            lib_rows = db.query(AgskReestrKtpMatch).filter(
+                AgskReestrKtpMatch.agsk_code.in_(agsk_codes),
+                AgskReestrKtpMatch.is_active == True,
+            ).all()
             for m in lib_rows:
                 library_map[m.agsk_code].append(m)
-                if m.ktp_id:
-                    ktp_ids_lib.add(m.ktp_id)
 
-        # ── 3. КТП для библиотечных записей ──────────────────────────────────
-        ktp_by_id: dict[int, Reestr_KTP] = {}
-        if ktp_ids_lib:
-            for r in db.query(Reestr_KTP).filter(Reestr_KTP.id.in_(ktp_ids_lib)).all():
-                ktp_by_id[r.id] = r
+        # ── 3. Все поставщики для найденных ЕНС ТРУ ──────────────────
+        suppliers_by_enstru = defaultdict(list)
+        if enstru_codes_set:
+            for code in enstru_codes_set:
+                all_s = db.query(Reestr_KTP).filter(Reestr_KTP.enstru_codes.contains([code])).all()
+                suppliers_by_enstru[code] = all_s
 
-        # ── 4. Прямые КТП (auto_ktp — точное) и групповые (auto — по префиксу) ──
-        direct_ktp_map: dict[str, Reestr_KTP] = {}
-        group_ktp_map: dict[str, Reestr_KTP] = {}
-
+        # ── 4. Прямые КТП и групповые для summary ──
+        direct_ktp_map = {}
+        group_ktp_map = {}
         if agsk_codes:
             for code in agsk_codes:
-                # Точное совпадение
-                r = (
-                    db.query(Reestr_KTP)
-                    .filter(Reestr_KTP.agsk3_codes.contains([code]))
-                    .first()
-                )
+                r = db.query(Reestr_KTP).filter(Reestr_KTP.agsk3_codes.contains([code])).first()
                 if r:
                     direct_ktp_map[code] = r
                     continue
-
-                # Групповое совпадение (родительский префикс 10 символов)
                 if len(code) >= 10:
                     parent = code[:10]
-                    r_group = (
-                        db.query(Reestr_KTP)
-                        .filter(
-                            text(
-                                "EXISTS ("
-                                "SELECT 1 FROM jsonb_array_elements_text(agsk3_codes) AS elem "
-                                "WHERE elem LIKE :prefix"
-                                ")"
-                            ).bindparams(prefix=f"{parent}%")
-                        )
-                        .first()
-                    )
-                    if r_group:
-                        group_ktp_map[code] = r_group
+                    r_group = db.query(Reestr_KTP).filter(
+                        text("EXISTS (SELECT 1 FROM jsonb_array_elements_text(agsk3_codes) AS elem WHERE elem LIKE :prefix)")
+                    ).params(prefix=f"{parent}%").first()
+                    if r_group: group_ktp_map[code] = r_group
 
-        # ── Хелпер: строка-основа позиции ────────────────────────────────────
-        def base_row(pos_num: int, item: PsdDocumentItem, agsk: Agsk) -> dict:
-            return {
-                "№ позиции": pos_num,
-                "Наименование позиции": item.name,
-                "Код АГСК": item.code_sn,
-                "Полное название АГСК": agsk.full_name if agsk else None,
-                "Ед. изм.": item.unit,
-                "Объем": float(item.volume) if item.volume else 0,
-                "Цена": float(item.price) if item.price else 0,
-                "Сумма": float(item.total_amount) if item.total_amount else 0,
-                # сопоставление
-                "Итог: Код ЕНС ТРУ": item.enstru_code,
-                "Итог: Наим. ЕНС ТРУ": item.enstru_name,
-                "Итог: Тип": item.match_type,
-                "Итог: Причина": item.match_reason,
-                # источник
-                "Источник": None,
-                # ЕДИНЫЕ столбцы для КТП/Библиотеки
-                "Компания": None,
-                "БИН": None,
-                "Наим. товара": None,
-                "ВЦ%": None,
-                "Адрес": None,
-                "Регион": None,
-                "Коды АГСК3": None,
-            }
+        wb = openpyxl.Workbook()
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="1B5E20", end_color="1B5E20", fill_type="solid")
+        sub_header_fill = PatternFill(start_color="E8F5E9", end_color="E8F5E9", fill_type="solid")
+        border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        
+        # ЛИСТ 1: СМЕТА
+        ws1 = wb.active
+        ws1.title = "Смета"
+        ws1.merge_cells('A1:Q1')
+        ws1['A1'] = "СМЕТА ЗАКУПОК"
+        ws1['A1'].font = Font(size=16, bold=True)
+        ws1['A1'].alignment = Alignment(horizontal='center')
+        if doc:
+            ws1.merge_cells('A2:Q2')
+            ws1['A2'] = f"Наименование проекта: {doc.bank_name}"
+            ws1['A2'].font = Font(bold=True, size=12)
 
-        def fill_ktp(row: dict, ktp: Reestr_KTP):
-            dvc = float(re.sub(r'[^0-9.]', '', ktp.dvc_percent)) if ktp.dvc_percent else 0
-            row.update({
-                "Компания": ktp.company_name,
-                "БИН": ktp.bin_iin,
-                "Наим. товара": ktp.product_name,
-                "ВЦ%": dvc,
-                "Адрес": ktp.production_address,
-                "Регион": ktp.region_kato,
-                "Коды АГСК3": ", ".join(ktp.agsk3_codes) if ktp.agsk3_codes else None,
-            })
+        columns1 = [
+            "№", "Код по ЕНС ТРУ", "Наименование закупаемых товаров услуг работ",
+            "Краткая характеристика", "Дополнительная характеристика",
+            "Единица измерения(МКЕИ)", "Количество, объём", "Цена за единицу тенге(без НДС)",
+            "Сумма планируемая для закупок ТРУ", "Место закупки(КАТО)", "Место поставки(КАТО)",
+            "Статья затрат", "Источник финансирования", "КОД АГСК для смр", "КТП", "ВЦ %", "Сумма ВЦ тенге без НДС"
+        ]
+        for col_idx, col_name in enumerate(columns1, 1):
+            cell = ws1.cell(row=5, column=col_idx, value=col_name)
+            cell.font = header_font; cell.fill = header_fill; cell.border = border
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        ws1.row_dimensions[5].height = 45
 
-        def fill_lib(row: dict, m: AgskReestrKtpMatch, ktp: Reestr_KTP | None):
-            """Заполняет единые столбцы из библиотечной записи"""
-            dvc = float(m.dvc_percent) if m.dvc_percent else 0
-            row.update({
-                "Компания": ktp.company_name if ktp else None,
-                "БИН": ktp.bin_iin if ktp else None,
-                "Наим. товара": m.product_name_ktp,
-                "ВЦ%": dvc,
-                "Адрес": ktp.production_address if ktp else None,
-                "Регион": ktp.region_kato if ktp else None,
-                "Коды АГСК3": ", ".join(ktp.agsk3_codes) if (ktp and ktp.agsk3_codes) else None,
-            })
+        ws1.merge_cells('A6:Q6')
+        ws1['A6'] = "1. Товары"; ws1['A6'].font = Font(bold=True, size=12); ws1['A6'].fill = sub_header_fill
+        
+        curr_row = 7; total_sum = Decimal('0'); total_vc_sum = Decimal('0')
+        for idx, (item, agsk) in enumerate(items_data, 1):
+            dvc_p = Decimal('0')
+            if item.match_type in ('auto_ktp', 'auto'):
+                r = direct_ktp_map.get(item.code_sn) or group_ktp_map.get(item.code_sn)
+                if r and r.dvc_percent:
+                    try: dvc_p = Decimal(re.sub(r'[^0-9.]', '', r.dvc_percent).replace(',', '.'))
+                    except: pass
+            elif item.match_type in ('manual', 'manual_ktp'):
+                lib = library_map.get(item.code_sn, [])
+                if lib: dvc_p = Decimal(str(lib[0].dvc_percent or 0))
 
-        # ── 5. Формируем строки ───────────────────────────────────────────────
-        data = []
+            i_total = Decimal(str(item.total_amount or 0)); vc_a = i_total * (dvc_p / 100)
+            row_data = [
+                f"{idx} Т", item.enstru_code or "", item.enstru_name or item.name, item.name, "", 
+                item.unit or "", float(item.volume or 0), float(item.price or 0), float(i_total),
+                "", "", "", "", item.code_sn or "", "Да" if item.match_type != 'none' else "Нет",
+                float(dvc_p), float(vc_a)
+            ]
+            total_sum += i_total; total_vc_sum += vc_a
+            for c_idx, val in enumerate(row_data, 1):
+                cell = ws1.cell(row=curr_row, column=c_idx, value=val); cell.border = border
+                if c_idx in [7, 8, 9, 16, 17]: cell.number_format = '#,##0.00'
+            curr_row += 1
 
-        for pos_num, (item, agsk) in enumerate(items, start=1):
+        ws1.merge_cells(f'A{curr_row}:H{curr_row}')
+        ws1.cell(row=curr_row, column=1, value="Итого по товарам:").font = Font(bold=True)
+        ws1.cell(row=curr_row, column=1).alignment = Alignment(horizontal='right')
+        ws1.cell(row=curr_row, column=9, value=float(total_sum)).font = Font(bold=True); ws1.cell(row=curr_row, column=9).number_format = '#,##0.00'
+        avg_vc = (total_vc_sum / total_sum * 100) if total_sum > 0 else 0
+        ws1.cell(row=curr_row, column=16, value=f"{avg_vc:.2f}%").font = Font(bold=True)
+        ws1.cell(row=curr_row, column=17, value=float(total_vc_sum)).font = Font(bold=True); ws1.cell(row=curr_row, column=17).number_format = '#,##0.00'
+
+        # ЛИСТ 2: АНАЛИЗ ПСД
+        ws2 = wb.create_sheet("Анализ ПСД")
+        columns2 = [
+            "№ позиции", "Наименование позиции", "Код АГСК", "Полное название АГСК",
+            "Ед. изм.", "Объем", "Цена", "Сумма",
+            "Итог: Код ЕНС ТРУ", "Итог: Наим. ЕНС ТРУ", "Итог: Тип", "Итог: Причина",
+            "Источник", "Компания", "БИН", "Наим. товара", "ВЦ%", "Адрес", "Регион", "Коды АГСК3"
+        ]
+        for col_idx, col_name in enumerate(columns2, 1):
+            cell = ws2.cell(row=1, column=col_idx, value=col_name)
+            cell.font = header_font; cell.fill = PatternFill("solid", fgColor="2C3E50"); cell.border = border
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        FILL_MAP = {
+            "Выбор аналитика": PatternFill("solid", fgColor="D5F5E3"), # Зеленый
+            "Авто-подбор (КТП)": PatternFill("solid", fgColor="D6EAF8"), # Синий
+            "Реестр (по коду ЕНС)": PatternFill("solid", fgColor="FEF9E7"), # Желтый
+            "Нет сопоставления": PatternFill("solid", fgColor="FADBD8"), # Красный
+        }
+        
+        curr_row2 = 2
+        for pos_idx, (item, agsk) in enumerate(items_data, 1):
+            base = [
+                pos_idx, item.name, item.code_sn, agsk.full_name if agsk else "",
+                item.unit, float(item.volume or 0), float(item.price or 0), float(item.total_amount or 0),
+                item.enstru_code, item.enstru_name, item.match_type, item.match_reason,
+            ]
+            
+            rows_to_add = []
+            selected_ktp_ids = set()
+            
+            # Собираем то что "Выбрано"
             lib_entries = library_map.get(item.code_sn or "", [])
-            direct_ktp = direct_ktp_map.get(item.code_sn or "") \
-                         or group_ktp_map.get(item.code_sn or "")
-            match_type = item.match_type or "none"
+            for m in lib_entries:
+                selected_ktp_ids.add(m.ktp_id)
+                dvc = float(m.dvc_percent or 0)
+                rk = db.query(Reestr_KTP).filter(Reestr_KTP.id == m.ktp_id).first()
+                rows_to_add.append(base + [
+                    "Выбор аналитика", rk.company_name if rk else None, rk.bin_iin if rk else None, 
+                    m.product_name_ktp, dvc, rk.production_address if rk else None, 
+                    rk.region_kato if rk else None, ", ".join(rk.agsk3_codes) if (rk and rk.agsk3_codes) else None
+                ])
 
-            if match_type == "none":
-                # ── Нет сопоставления: одна строка ───────────────────────────
-                row = base_row(pos_num, item, agsk)
-                row["Источник"] = "Нет сопоставления"
-                data.append(row)
+            # Авто-подбор
+            auto_ktp = direct_ktp_map.get(item.code_sn) or group_ktp_map.get(item.code_sn)
+            if auto_ktp and auto_ktp.id not in selected_ktp_ids:
+                dvc = float(re.sub(r'[^0-9.]', '', auto_ktp.dvc_percent).replace(',', '.')) if auto_ktp.dvc_percent else 0
+                rows_to_add.append(base + [
+                    "Авто-подбор (КТП)", auto_ktp.company_name, auto_ktp.bin_iin, auto_ktp.product_name, 
+                    dvc, auto_ktp.production_address, auto_ktp.region_kato, 
+                    ", ".join(auto_ktp.agsk3_codes) if auto_ktp.agsk3_codes else ""
+                ])
+                selected_ktp_ids.add(auto_ktp.id)
 
-            elif match_type in ("auto_ktp", "auto"):
-                # ── Только КТП (авто): одна строка ──────────────────────────
-                row = base_row(pos_num, item, agsk)
-                row["Источник"] = "КТП (авто)"
-                if direct_ktp:
-                    fill_ktp(row, direct_ktp)
-                data.append(row)
+            # Реестр
+            if item.enstru_code:
+                all_suppliers = suppliers_by_enstru.get(item.enstru_code, [])
+                for s in all_suppliers:
+                    if s.id not in selected_ktp_ids:
+                        dvc = float(re.sub(r'[^0-9.]', '', s.dvc_percent).replace(',', '.')) if s.dvc_percent else 0
+                        rows_to_add.append(base + [
+                            "Реестр (по коду ЕНС)", s.company_name, s.bin_iin, s.product_name, 
+                            dvc, s.production_address, s.region_kato, 
+                            ", ".join(s.agsk3_codes) if s.agsk3_codes else ""
+                        ])
 
-            elif match_type == "manual":
-                # ── Только библиотека: по одной строке на каждую запись ───────
-                if lib_entries:
-                    for m in lib_entries:
-                        row = base_row(pos_num, item, agsk)
-                        row["Источник"] = "Библиотека"
-                        fill_lib(row, m, ktp_by_id.get(m.ktp_id) if m.ktp_id else None)
-                        data.append(row)
-                else:
-                    row = base_row(pos_num, item, agsk)
-                    row["Источник"] = "Библиотека"
-                    data.append(row)
+            if not rows_to_add:
+                rows_to_add.append(base + ["Нет сопоставления"] + [None]*7)
 
-            elif match_type == "manual_ktp":
-                # ── КТП + Библиотека: сначала строка КТП, потом строки библиотеки ──
+            for r_data in rows_to_add:
+                src = r_data[12]; fill = FILL_MAP.get(src, PatternFill())
+                for c_idx, val in enumerate(r_data, 1):
+                    cell = ws2.cell(row=curr_row2, column=c_idx, value=val)
+                    cell.fill = fill; cell.border = border
+                    if c_idx in [6, 7, 8, 17]: cell.number_format = '#,##0.00'
+                ws2.cell(row=curr_row2, column=13).font = Font(bold=True)
+                curr_row2 += 1
 
-                # Строка КТП
-                row_ktp = base_row(pos_num, item, agsk)
-                row_ktp["Источник"] = "КТП (авто)"
-
-                if lib_entries:
-                    first_lib_ktp = ktp_by_id.get(lib_entries[0].ktp_id) if lib_entries[0].ktp_id else None
-                    if first_lib_ktp:
-                        fill_ktp(row_ktp, first_lib_ktp)
-                    elif direct_ktp:
-                        fill_ktp(row_ktp, direct_ktp)
-                elif direct_ktp:
-                    fill_ktp(row_ktp, direct_ktp)
-
-                data.append(row_ktp)
-
-                # Строки библиотеки
-                for m in lib_entries:
-                    row_lib = base_row(pos_num, item, agsk)
-                    row_lib["Источник"] = "Библиотека"
-                    fill_lib(row_lib, m, ktp_by_id.get(m.ktp_id) if m.ktp_id else None)
-                    data.append(row_lib)
-
-            else:
-                # Неизвестный тип — одна строка
-                row = base_row(pos_num, item, agsk)
-                row["Источник"] = match_type
-                data.append(row)
-
-        if not data:
-            return None
-
-        # ── 6. Красим Excel ───────────────────────────────────────────────────
-        import openpyxl
-        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-        from openpyxl.utils import get_column_letter
-
-        df = pd.DataFrame(data)
+        for ws in [ws1, ws2]:
+            for i, col in enumerate(ws.columns, 1):
+                m_l = 0
+                for cell in col:
+                    try:
+                        if cell.value and len(str(cell.value)) > m_l: m_l = len(str(cell.value))
+                    except: pass
+                ws.column_dimensions[get_column_letter(i)].width = min(m_l + 2, 40)
+        
         os.makedirs("/tmp", exist_ok=True)
         file_path = f"/tmp/psd_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        wb.save(file_path); return file_path
 
-        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Анализ ПСД")
-            ws = writer.sheets["Анализ ПСД"]
+    def generate_psd_conclusion_docx(self, db: Session, doc_id: int, current_user: User) -> Optional[str]:
+        """
+        Генерирует официальное заключение аналитика по ПСД в формате DOCX.
+        """
+        doc_entity = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
+        if not doc_entity:
+            return None
 
-            # Цвета по типу источника
-            FILL = {
-                "КТП (авто)": PatternFill("solid", fgColor="D6EAF8"),  # голубой
-                "Библиотека": PatternFill("solid", fgColor="D5F5E3"),  # зелёный
-                "КТП + Библиотека": PatternFill("solid", fgColor="FEF9E7"),  # жёлтый
-                "Нет сопоставления": PatternFill("solid", fgColor="FADBD8"),  # красный
-            }
-            header_fill = PatternFill("solid", fgColor="2C3E50")
-            header_font = Font(bold=True, color="FFFFFF")
-            thin = Side(style="thin", color="CCCCCC")
-            border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        # Собираем статистику
+        total_items = db.query(PsdDocumentItem).filter(PsdDocumentItem.document_id == doc_id).count()
+        matched_items = db.query(PsdDocumentItem).filter(
+            PsdDocumentItem.document_id == doc_id,
+            PsdDocumentItem.match_type != 'none'
+        ).count()
+        
+        total_amount = db.query(func.sum(PsdDocumentItem.total_amount)).filter(PsdDocumentItem.document_id == doc_id).scalar() or 0
+        
+        # Считаем ВЦ
+        items = db.query(PsdDocumentItem).filter(PsdDocumentItem.document_id == doc_id).all()
+        total_vc_amount = Decimal('0')
+        
+        for it in items:
+            dvc = Decimal('0')
+            if it.match_type != 'none':
+                # Пытаемся получить процент из библиотеки или КТП
+                match = db.query(AgskReestrKtpMatch).filter(
+                    AgskReestrKtpMatch.agsk_code == it.code_sn,
+                    AgskReestrKtpMatch.is_active == True
+                ).first()
+                if match:
+                    dvc = Decimal(str(match.dvc_percent or 0))
+                else:
+                    rk = db.query(Reestr_KTP).filter(Reestr_KTP.enstru_codes.contains([it.enstru_code])).first()
+                    if rk and rk.dvc_percent:
+                        try: dvc = Decimal(re.sub(r'[^0-9.]', '', rk.dvc_percent).replace(',', '.'))
+                        except: pass
+            
+            total_vc_amount += Decimal(str(it.total_amount or 0)) * (dvc / 100)
 
-            # Шапка
-            for cell in ws[1]:
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = Alignment(horizontal="center", wrap_text=True)
+        avg_vc_percent = (total_vc_amount / Decimal(str(total_amount)) * 100) if total_amount > 0 else 0
 
-            # Колонка "Источник"
-            source_col_idx = df.columns.get_loc("Источник") + 1
+        # Создаем документ
+        doc = Document()
+        
+        # Заголовок
+        title = doc.add_heading('ЗАКЛЮЧЕНИЕ АНАЛИТИКА ПСД', 0)
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # Строки данных
-            for row_idx, excel_row in enumerate(ws.iter_rows(min_row=2), start=2):
-                source_cell = ws.cell(row=row_idx, column=source_col_idx)
-                source_val = source_cell.value or ""
-                fill = FILL.get(source_val, PatternFill())
-                for cell in excel_row:
-                    cell.fill = fill
-                    cell.border = border
-                    cell.alignment = Alignment(wrap_text=False, vertical="center")
-                source_cell.font = Font(bold=True)
+        # Основная информация
+        p = doc.add_paragraph()
+        p.add_run('Дата формирования: ').bold = True
+        p.add_run(datetime.now().strftime('%d.%m.%Y %H:%M'))
+        
+        p = doc.add_paragraph()
+        p.add_run('Аналитик: ').bold = True
+        p.add_run(f"{current_user.full_name or current_user.username}")
 
-            # Ширина колонок
-            for col_idx, col_name in enumerate(df.columns, start=1):
-                max_len = max(len(str(col_name)), 10)
-                ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 4, 40)
+        p = doc.add_paragraph()
+        p.add_run('Наименование проекта (Банк): ').bold = True
+        p.add_run(f"{doc_entity.bank_name}")
 
-            ws.freeze_panes = "A2"
+        p = doc.add_paragraph()
+        p.add_run('Статус обработки: ').bold = True
+        p.add_run(f"{doc_entity.status}")
 
+        doc.add_heading('Результаты анализа', level=1)
+        
+        table = doc.add_table(rows=1, cols=2)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Показатель'
+        hdr_cells[1].text = 'Значение'
+        
+        data = [
+            ('Общее количество позиций', str(total_items)),
+            ('Сопоставлено позиций', str(matched_items)),
+            ('Процент сопоставления', f"{(matched_items/total_items*100):.1f}%" if total_items > 0 else "0%"),
+            ('Общая сумма проекта', f"{float(total_amount):,.2f} тенге"),
+            ('Прогнозируемая сумма ВЦ', f"{float(total_vc_amount):,.2f} тенге"),
+            ('Средний процент ВЦ', f"{float(avg_vc_percent):.2f}%"),
+        ]
+        
+        for label, value in data:
+            row_cells = table.add_row().cells
+            row_cells[0].text = label
+            row_cells[1].text = value
+
+        doc.add_paragraph()
+        doc.add_heading('Выводы', level=1)
+        conclusion_text = (
+            f"В ходе анализа проектно-сметной документации '{doc_entity.bank_name}' было обработано {total_items} позиций. "
+            f"Уровень внутристрановой ценности (ВЦ) по проекту оценивается в {float(avg_vc_percent):.2f}%. "
+        )
+        if avg_vc_percent > 50:
+            conclusion_text += "Проект демонстрирует высокий потенциал использования казахстанского содержания."
+        else:
+            conclusion_text += "Рекомендуется дополнительный поиск отечественных производителей для увеличения доли ВЦ."
+            
+        doc.add_paragraph(conclusion_text)
+
+        doc.add_paragraph().add_run('\n\n__________________________ / Подпись /').italic = True
+
+        # Сохранение
+        os.makedirs("/tmp", exist_ok=True)
+        file_path = f"/tmp/conclusion_{doc_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+        doc.save(file_path)
         return file_path

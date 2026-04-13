@@ -3,16 +3,14 @@ from pydantic import Field, AliasChoices
 from typing import Optional
 
 class Settings(BaseSettings):
-    # Настройка Pydantic: читать .env, игнорировать лишние поля
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # База данных
-    DATABASE_URL: str = "sqlite:///./baiterek.db"
+    DATABASE_URL: str
     
     # Безопасность
-    # Ищем сначала 'jwt_secret_key', затем 'SECRET_KEY'
     SECRET_KEY: str = Field(
-        default="a_very_secret_key_that_should_be_in_env_vars",
+        default="change_me_in_env",
         validation_alias=AliasChoices('jwt_secret_key', 'SECRET_KEY')
     )
     ALGORITHM: str = Field(
@@ -23,10 +21,6 @@ class Settings(BaseSettings):
         default=60 * 24, # 24 часа
         validation_alias=AliasChoices('jwt_expire_minutes', 'ACCESS_TOKEN_EXPIRE_MINUTES')
     )
-    
-    # Админ (Hardcoded)
-    ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD: str = "admin123" # В реальном проекте смените на сложный пароль!
     
     # Бизнес-логика
     SMR_COST_ITEM_ID: int = 1 # ID статьи затрат "СМР"

@@ -113,3 +113,21 @@ def export_full_analysis_report(
         filename=file_name,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+@router.get("/documents/{doc_id}/conclusion")
+def generate_conclusion_docx(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Генерация официального заключения аналитика в DOCX"""
+    file_path = psd_service.generate_psd_conclusion_docx(db, doc_id, current_user)
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=500, detail="Не удалось сгенерировать заключение")
+
+    file_name = f"Conclusion_PSD_{doc_id}.docx"
+    return FileResponse(
+        path=file_path,
+        filename=file_name,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
