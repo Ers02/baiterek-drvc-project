@@ -3,7 +3,7 @@ import {
   Box, Container, Typography, Paper, Tabs, Tab, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   CircularProgress, Alert, Chip, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, MenuItem, IconButton, Tooltip, Grid, Card, CardContent
+  TextField, MenuItem, IconButton, Tooltip, Grid, Card, CardContent, Divider
 } from '@mui/material';
 import { 
     Upload as UploadIcon, Person as PersonIcon, Description as DescriptionIcon, 
@@ -11,7 +11,8 @@ import {
     Send as SendIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon,
     AccessTime as AccessTimeIcon, InsertChart as InsertChartIcon,
     MonetizationOn as MonetizationOnIcon, PieChart as PieChartIcon,
-    ListAlt as ListAltIcon, Category as CategoryIcon
+    ListAlt as ListAltIcon, Category as CategoryIcon,
+    ContactPage as ContactIcon
 } from '@mui/icons-material';
 import {
   Chart as ChartJS,
@@ -25,7 +26,7 @@ import {
 } from 'chart.js';
 import { Bar, Pie } from 'react-chartjs-2';
 import Header from '../components/Header';
-import { differenceInDays } from 'date-fns';
+import { calculateWorkingDays } from '../utils/dateUtils';
 import {
     adminGetUsers,
     adminGetPlans,
@@ -253,6 +254,13 @@ const ExternalDocsTab = () => {
     const [receivedAt, setReceivedAt] = useState('');
     const [notes, setNotes] = useState('');
 
+    // Новые поля отправителя
+    const [senderFirstName, setSenderFirstName] = useState('');
+    const [senderLastName, setSenderLastName] = useState('');
+    const [senderPatronymic, setSenderPatronymic] = useState('');
+    const [senderEmail, setSenderEmail] = useState('');
+    const [senderPhone, setSenderPhone] = useState('');
+
     const loadDocs = () => {
         setLoading(true);
         setError('');
@@ -269,16 +277,28 @@ const ExternalDocsTab = () => {
     const handleUpload = async () => {
         if (!file || !bankName || !receivedAt) return;
         try {
-            await uploadExternalDoc(file, docType, bankName, receivedAt, notes);
+            await uploadExternalDoc(
+                file, docType, bankName, receivedAt, notes,
+                senderFirstName, senderLastName, senderPatronymic, senderEmail, senderPhone
+            );
             setUploadOpen(false);
             loadDocs();
-            setFile(null);
-            setBankName('');
-            setReceivedAt('');
-            setNotes('');
+            resetForm();
         } catch (e) {
             alert("Ошибка загрузки");
         }
+    };
+
+    const resetForm = () => {
+        setFile(null);
+        setBankName('');
+        setReceivedAt('');
+        setNotes('');
+        setSenderFirstName('');
+        setSenderLastName('');
+        setSenderPatronymic('');
+        setSenderEmail('');
+        setSenderPhone('');
     };
 
     const handleSendResponse = async (docId: number) => {
@@ -290,12 +310,6 @@ const ExternalDocsTab = () => {
                 alert("Ошибка отправки ответа");
             }
         }
-    };
-
-    const getDaysInWork = (doc: any) => {
-        const start = new Date(doc.received_at);
-        const end = doc.completed_at ? new Date(doc.completed_at) : new Date();
-        return differenceInDays(end, start);
     };
 
     if (loading) return <CircularProgress />;
@@ -314,39 +328,43 @@ const ExternalDocsTab = () => {
                     <TableHead>
                         <TableRow>
                             <TableCell>ID</TableCell>
-                            <TableCell>Банк</TableCell>
-                            <TableCell>Тип</TableCell>
+                            <TableCell>Банк / Объект</TableCell>
+                            <TableCell>Отправитель</TableCell>
                             <TableCell>Дата получения</TableCell>
-                            <TableCell>Дней в работе</TableCell>
+                            <TableCell>Рабочих дней</TableCell>
                             <TableCell>Статус</TableCell>
-                            <TableCell>Примечание</TableCell>
                             <TableCell align="right">Действия</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
                         {docs.map((doc) => {
-                            const days = getDaysInWork(doc);
-                            const isOverdue = days > 5 && doc.status !== 'SENT';
+                            const days = calculateWorkingDays(doc.received_at, doc.completed_at || new Date());
+                            const isOverdue = days > 10 && doc.status !== 'SENT';
                             
                             return (
                                 <TableRow key={doc.id}>
                                     <TableCell>{doc.id}</TableCell>
-                                    <TableCell>{doc.bank_name}</TableCell>
                                     <TableCell>
-                                        <Chip 
-                                            label={doc.doc_type} 
-                                            color={doc.doc_type === 'PSD' ? 'primary' : 'secondary'} 
-                                            size="small" 
-                                        />
+                                        <Typography variant="body2" fontWeight="bold">{doc.bank_name}</Typography>
+                                        <Typography variant="caption" color="text.secondary">{doc.doc_type}</Typography>
+                                    </TableCell>
+                                    <TableCell>
+                                        {doc.sender_last_name ? (
+                                            <Box>
+                                                <Typography variant="body2">{doc.sender_last_name} {doc.sender_first_name}</Typography>
+                                                <Typography variant="caption" color="text.secondary">{doc.sender_email || doc.sender_phone}</Typography>
+                                            </Box>
+                                        ) : "—"}
                                     </TableCell>
                                     <TableCell>{new Date(doc.received_at).toLocaleString()}</TableCell>
                                     <TableCell>
                                         <Chip 
                                             icon={<AccessTimeIcon />}
-                                            label={`${days} дн.`} 
+                                            label={`${days} раб. дн.`}
                                             color={isOverdue ? 'error' : 'default'} 
                                             variant={isOverdue ? 'filled' : 'outlined'}
                                             size="small" 
+                                            sx={{ fontWeight: 'bold' }}
                                         />
                                     </TableCell>
                                     <TableCell>
@@ -359,7 +377,6 @@ const ExternalDocsTab = () => {
                                             size="small" 
                                         />
                                     </TableCell>
-                                    <TableCell>{doc.notes}</TableCell>
                                     <TableCell align="right">
                                         <Stack direction="row" spacing={1} justifyContent="flex-end">
                                             <Tooltip title="Скачать файл">
@@ -390,26 +407,54 @@ const ExternalDocsTab = () => {
                 </Table>
             </TableContainer>
 
-            <Dialog open={uploadOpen} onClose={() => setUploadOpen(false)}>
+            <Dialog open={uploadOpen} onClose={() => setUploadOpen(false)} maxWidth="md" fullWidth>
                 <DialogTitle>Загрузка внешнего документа</DialogTitle>
                 <DialogContent>
-                    <Stack spacing={2} sx={{ mt: 1, minWidth: 400 }}>
-                        <TextField select label="Тип документа" value={docType} onChange={(e) => setDocType(e.target.value)} fullWidth>
-                            <MenuItem value="PSD">ПСД (KENML)</MenuItem>
-                            <MenuItem value="SMETA">Смета (Excel)</MenuItem>
-                        </TextField>
-                        <TextField label="Название банка" value={bankName} onChange={(e) => setBankName(e.target.value)} fullWidth />
-                        <TextField label="Дата и время получения" type="datetime-local" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} fullWidth InputLabelProps={{ shrink: true }} />
-                        <TextField label="Примечание" value={notes} onChange={(e) => setNotes(e.target.value)} fullWidth multiline rows={2} />
-                        <Button variant="outlined" component="label">
-                            {file ? file.name : "Выбрать файл"}
-                            <input type="file" hidden onChange={(e) => setFile(e.target.files?.[0] || null)} />
-                        </Button>
-                    </Stack>
+                    <Grid container spacing={3} sx={{ mt: 0.5 }}>
+                        <Grid item xs={12} md={6}>
+                            <Typography variant="subtitle2" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <DescriptionIcon color="primary" fontSize="small" /> Основная информация
+                            </Typography>
+                            <Stack spacing={2}>
+                                <TextField select label="Тип документа" value={docType} onChange={(e) => setDocType(e.target.value)} fullWidth size="small">
+                                    <MenuItem value="PSD">ПСД (KENML)</MenuItem>
+                                    <MenuItem value="SMETA">Смета (Excel)</MenuItem>
+                                </TextField>
+                                <TextField label="Наименование объекта / Банка" value={bankName} onChange={(e) => setBankName(e.target.value)} fullWidth size="small" />
+                                <TextField label="Дата и время получения" type="datetime-local" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} fullWidth size="small" InputLabelProps={{ shrink: true }} />
+                                <TextField label="Примечание" value={notes} onChange={(e) => setNotes(e.target.value)} fullWidth multiline rows={2} size="small" />
+                            </Stack>
+                        </Grid>
+                        
+                        <Grid item xs={12} md={6}>
+                            <Typography variant="subtitle2" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <ContactIcon color="primary" fontSize="small" /> Данные отправителя
+                            </Typography>
+                            <Stack spacing={2}>
+                                <TextField label="Фамилия" value={senderLastName} onChange={(e) => setSenderLastName(e.target.value)} fullWidth size="small" />
+                                <TextField label="Имя" value={senderFirstName} onChange={(e) => setSenderFirstName(e.target.value)} fullWidth size="small" />
+                                <TextField label="Отчество" value={senderPatronymic} onChange={(e) => setSenderPatronymic(e.target.value)} fullWidth size="small" />
+                                <TextField label="Email" type="email" value={senderEmail} onChange={(e) => setSenderEmail(e.target.value)} fullWidth size="small" />
+                                <TextField label="Телефон" value={senderPhone} onChange={(e) => setSenderPhone(e.target.value)} fullWidth size="small" />
+                            </Stack>
+                        </Grid>
+                        
+                        <Grid item xs={12}>
+                            <Divider sx={{ my: 1 }} />
+                            <Box sx={{ mt: 1 }}>
+                                <Button variant="outlined" component="label" fullWidth sx={{ borderStyle: 'dashed', py: 2 }}>
+                                    {file ? `Файл: ${file.name}` : "Выбрать файл документа"}
+                                    <input type="file" hidden onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                                </Button>
+                            </Box>
+                        </Grid>
+                    </Grid>
                 </DialogContent>
-                <DialogActions>
+                <DialogActions sx={{ p: 2 }}>
                     <Button onClick={() => setUploadOpen(false)}>Отмена</Button>
-                    <Button onClick={handleUpload} variant="contained" disabled={!file || !bankName || !receivedAt}>Загрузить</Button>
+                    <Button onClick={handleUpload} variant="contained" disabled={!file || !bankName || !receivedAt}>
+                        Загрузить в систему
+                    </Button>
                 </DialogActions>
             </Dialog>
         </Box>

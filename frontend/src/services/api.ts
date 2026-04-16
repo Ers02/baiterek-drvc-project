@@ -178,13 +178,30 @@ export const downloadAdminTaskResult = async (taskId: string): Promise<void> => 
 
 export const getExternalDocs = (): Promise<any[]> => api.get('/admin/external/documents').then(res => res.data);
 
-export const uploadExternalDoc = (file: File, docType: string, bankName: string, receivedAt: string, notes: string): Promise<any> => {
+export const uploadExternalDoc = (
+    file: File,
+    docType: string,
+    bankName: string,
+    receivedAt: string,
+    notes: string,
+    senderFirstName?: string,
+    senderLastName?: string,
+    senderPatronymic?: string,
+    senderEmail?: string,
+    senderPhone?: string
+): Promise<any> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('doc_type', docType);
     formData.append('bank_name', bankName);
     formData.append('received_at', receivedAt);
     if (notes) formData.append('notes', notes);
+    if (senderFirstName) formData.append('sender_first_name', senderFirstName);
+    if (senderLastName) formData.append('sender_last_name', senderLastName);
+    if (senderPatronymic) formData.append('sender_patronymic', senderPatronymic);
+    if (senderEmail) formData.append('sender_email', senderEmail);
+    if (senderPhone) formData.append('sender_phone', senderPhone);
+
     return api.post('/admin/external/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     }).then(res => res.data);

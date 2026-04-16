@@ -10,6 +10,18 @@ class ExternalDocument(Base):
     id = Column(Integer, primary_key=True)
     doc_type = Column(String(20), nullable=False)
     bank_name = Column(String(255), nullable=False)
+    
+    # Данные отправителя из дочерней организации
+    sender_first_name = Column(String(100), nullable=True)
+    sender_last_name = Column(String(100), nullable=True)
+    sender_patronymic = Column(String(100), nullable=True)
+    sender_email = Column(String(255), nullable=True)
+    sender_phone = Column(String(50), nullable=True)
+    
+    # Данные для интеграции
+    external_id = Column(String(100), nullable=True, index=True)  # ID документа во внешней системе
+    callback_url = Column(String(500), nullable=True)            # URL для отправки результата
+
     received_at = Column(DateTime(timezone=True), nullable=False)
     file_path = Column(String(500), nullable=False)
     status = Column(String(20), default="NEW")
@@ -20,6 +32,10 @@ class ExternalDocument(Base):
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
     assigned_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Новое поле для тестовых проектов
+    is_test = Column(Boolean, default=False, server_default='false')
+    
     assigned_user = relationship("User", foreign_keys=[assigned_to])
 
 class PsdDocumentItem(Base):
@@ -72,7 +88,6 @@ class AgskReestrKtpMatch(Base):
     is_active = Column(Boolean, default=True)
     
     __table_args__ = (
-        # Переименовал индекс для избежания конфликта в Postgres
         UniqueConstraint('agsk_code', 'enstru_code', 'ktp_id', name='uq_agsk_reestr_ktp_manual_v2'),
     )
 

@@ -114,3 +114,17 @@ def get_current_admin_or_analyst(current_user: User = Depends(get_current_user))
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Требуются права администратора или аналитика ДРВЦ"
     )
+
+
+def get_current_admin_strict(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Строгая зависимость только для администратора (ADMIN).
+    Не допускает аналитика ДРВЦ.
+    """
+    if current_user.role == UserRole.ADMIN:
+        return current_user
+    
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Требуются права администратора"
+    )

@@ -2,11 +2,15 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, String, desc, text, cast, case
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any, Literal, Union
 from datetime import datetime, timezone
 import pandas as pd
 import os
 import re
+import zipfile
+import shutil
+import uuid
+import io
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -380,16 +384,40 @@ class PsdAnalystService:
         return {"status": "ok"}
 
     def parse_psd_file(self, db: Session, doc_id: int, file_path: str):
+        """
+        Парсинг файла .kenml или архива .zip с .kenml файлами внутри.
+        """
         from .psd_analyzer.analyzer import clean_product_name, is_non_product, has_letters
         from .importers.kenml_parser import parse_kenml_file
-        rows = parse_kenml_file(
-            type('F', (), {
-                'file': open(file_path, 'rb'),
-                'filename': os.path.basename(file_path),
-            })()
-        )
+        
+        all_rows = []
+        
+        if file_path.lower().endswith('.zip'):
+            with zipfile.ZipFile(file_path, 'r') as z:
+                for name in z.namelist():
+                    if name.lower().endswith('.kenml'):
+                        with z.open(name) as f:
+                            # Читаем содержимое файла в буфер
+                            content = f.read()
+                            # kenml_parser ожидает объект с атрибутами 'file' и 'filename'
+                            fake_file = type('F', (), {
+                                'file': io.BytesIO(content),
+                                'filename': name,
+                            })()
+                            rows = parse_kenml_file(fake_file)
+                            all_rows.extend(rows)
+        else:
+            # Одиночный kenml
+            rows = parse_kenml_file(
+                type('F', (), {
+                    'file': open(file_path, 'rb'),
+                    'filename': os.path.basename(file_path),
+                })()
+            )
+            all_rows.extend(rows)
+            
         unique_items = {}
-        for row in rows:
+        for row in all_rows:
             try:
                 amount = float(row.get('Сумма', 0))
                 if amount <= 0.01:

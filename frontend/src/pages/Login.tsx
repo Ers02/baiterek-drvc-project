@@ -12,6 +12,7 @@ import {
 import { Login as LoginIcon } from '@mui/icons-material'
 import api from '../services/api'
 import { useNavigate } from 'react-router-dom'
+import { jwtDecode } from 'jwt-decode'
 
 interface LoginProps {
   setToken: (token: string) => void;
@@ -50,7 +51,20 @@ export default function Login({ setToken }: LoginProps) {
       const token = res.data.access_token;
       localStorage.setItem('token', token);
       setToken(token);
-      navigate('/');
+      
+      // Редирект в зависимости от роли
+      try {
+        const decoded: any = jwtDecode(token);
+        if (decoded.role === 'analyst_drvc') {
+          navigate('/psd-analyst');
+        } else if (decoded.is_admin === true) {
+          navigate('/admin');
+        } else {
+          navigate('/');
+        }
+      } catch (e) {
+        navigate('/');
+      }
     } catch (err: any) {
       // Важно: берем ошибку из ответа бэкенда
       const errorDetail = err.response?.data?.detail;

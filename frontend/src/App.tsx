@@ -29,7 +29,7 @@ const AdminRoute = ({ children }: { children: JSX.Element }) => {
   return hasAdminAccess ? children : <Navigate to="/" />;
 };
 
-// Роут для главной страницы с редиректом аналитика ДРВЦ на админку
+// Роут для главной страницы с редиректом аналитика ДРВЦ на страницу ПСД
 const HomeRoute = ({ children }: { children: JSX.Element }) => {
   const token = localStorage.getItem('token');
   let isAnalyst = false;
@@ -40,9 +40,9 @@ const HomeRoute = ({ children }: { children: JSX.Element }) => {
       } catch (e) {}
   }
 
-  // Аналитик ДРВЦ редиректится на /admin
+  // Аналитик ДРВЦ редиректится на /psd-analyst
   if (isAnalyst) {
-      return <Navigate to="/admin" />;
+      return <Navigate to="/psd-analyst" />;
   }
 
   return children;

@@ -31,7 +31,12 @@ def upload_external_document(
     doc_type: str, 
     bank_name: str, 
     received_at: datetime,
-    notes: str = None
+    notes: str = None,
+    sender_first_name: str = None,
+    sender_last_name: str = None,
+    sender_patronymic: str = None,
+    sender_email: str = None,
+    sender_phone: str = None
 ):
     """
     Загружает документ в систему (без запуска анализа).
@@ -45,7 +50,12 @@ def upload_external_document(
             received_at=received_at,
             file_path=file_path,
             status="NEW",
-            notes=notes
+            notes=notes,
+            sender_first_name=sender_first_name,
+            sender_last_name=sender_last_name,
+            sender_patronymic=sender_patronymic,
+            sender_email=sender_email,
+            sender_phone=sender_phone
         )
         db.add(doc)
         db.commit()

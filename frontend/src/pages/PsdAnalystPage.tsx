@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Button, Tabs, Tab, Chip, IconButton, Dialog,
   DialogTitle, DialogContent, TextField, DialogActions, Tooltip,
   Pagination, Divider, Card, CardContent, InputAdornment,
-  LinearProgress, CircularProgress, Stack
+  LinearProgress, CircularProgress, Stack, FormControlLabel, Switch,
+  Avatar, ToggleButton, ToggleButtonGroup
 } from '@mui/material';
 import {
-  Add as AddIcon, Delete as DeleteIcon, Download as DownloadIcon,
+  Delete as DeleteIcon, Download as DownloadIcon,
   Search as SearchIcon, Refresh as RefreshIcon, Business as BusinessIcon,
   Close as CloseIcon, Edit as EditIcon,
   LocationOn as LocationOnIcon,
@@ -17,11 +18,23 @@ import {
   InfoOutlined as InfoIcon,
   LibraryBooks as LibraryIcon,
   FileDownload as FileDownloadIcon,
-  Description as DescriptionIcon
+  Description as DescriptionIcon,
+  UploadFile as UploadIcon,
+  Science as ScienceIcon,
+  Person as PersonIcon,
+  Email as EmailIcon,
+  Phone as PhoneIcon,
+  AssignmentInd as AssignIcon,
+  Group as GroupIcon,
+  PersonOutline as PersonOutlineIcon,
+  AccessTime as AccessTimeIcon,
+  CheckCircle as CheckCircleIcon,
+  Send as SendIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n';
 import Header from '../components/Header';
 import api from '../services/api';
+import { calculateWorkingDays } from '../utils/dateUtils';
 
 function useDebounce(value: any, delay: number) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -108,6 +121,9 @@ const PsdAnalystPage: React.FC = () => {
   const [parsing, setParsing] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [docxLoading, setDocxLoading] = useState(false);
+  const [finishLoading, setFinishLoading] = useState(false);
+  const [showTests, setShowTests] = useState(false);
+  const [assignedToMe, setAssignedToMe] = useState(false);
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingMatch, setEditingMatch] = useState<AgskMatch | null>(null);
@@ -127,9 +143,14 @@ const PsdAnalystPage: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [onlyUnmatched, setOnlyUnmatched] = useState(false);
 
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [testProjectName, setTestProjectName] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
   const requestCounter = useRef(0);
 
-  useEffect(() => { loadDocuments(); loadArchive(); }, []);
+  useEffect(() => { loadDocuments(); loadArchive(); }, [showTests, assignedToMe]);
 
   useEffect(() => {
     if (selectedDoc) loadMatches(selectedDoc.id);
@@ -144,7 +165,9 @@ const PsdAnalystPage: React.FC = () => {
   }, [debouncedReestrSearch, searchMode]);
 
   const loadDocuments = async () => {
-    const res = await api.get('/psd-analyst/documents');
+    const res = await api.get('/psd-analyst/documents', {
+        params: { is_test: showTests, assigned_to_me: assignedToMe }
+    });
     setDocuments(res.data);
   };
   const loadArchive = async () => {
@@ -175,6 +198,17 @@ const PsdAnalystPage: React.FC = () => {
     }
   };
 
+  const handleDeleteDocument = async (docId: number) => {
+    if (!window.confirm('Вы уверены, что хотите удалить этот проект? Это действие необратимо.')) return;
+    try {
+        await api.delete(`/psd-analyst/documents/${docId}`);
+        if (selectedDoc?.id === docId) setSelectedDoc(null);
+        loadDocuments();
+    } catch (err) {
+        alert('Ошибка при удалении');
+    }
+  };
+
   const handleParse = async () => {
     if (!selectedDoc) return;
     setParsing(true);
@@ -182,6 +216,56 @@ const PsdAnalystPage: React.FC = () => {
       await api.post(`/psd-analyst/documents/${selectedDoc.id}/parse`);
       await loadMatches(selectedDoc.id);
     } finally { setParsing(false); }
+  };
+
+  const handleFinishAnalysis = async () => {
+    if (!selectedDoc) return;
+    if (!window.confirm('Завершить анализ? Это действие сформирует финальный отчет и отправит его дочерней организации по API (если настроено).')) return;
+    
+    setFinishLoading(true);
+    try {
+        await api.post(`/psd-analyst/documents/${selectedDoc.id}/finish`);
+        alert('Анализ успешно завершен!');
+        loadDocuments();
+        setActiveTab(0);
+        setSelectedDoc(null);
+    } catch (err) {
+        alert('Ошибка при завершении анализа');
+    } finally {
+        setFinishLoading(false);
+    }
+  };
+
+  const handleUploadTest = async () => {
+    if (!selectedFile || !testProjectName) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('project_name', testProjectName);
+
+      const res = await api.post('/psd-analyst/upload-test', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      setUploadDialogOpen(false);
+      setTestProjectName('');
+      setSelectedFile(null);
+      
+      // Переключаемся на тесты и загружаем список
+      setShowTests(true);
+      await loadDocuments();
+      
+      // Открываем созданный документ
+      if (res.data) {
+        setSelectedDoc(res.data);
+        setActiveTab(1);
+      }
+    } catch (err) {
+      alert('Ошибка при загрузке: ' + err);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const openEditDialog = async (match: AgskMatch) => {
@@ -356,10 +440,56 @@ const PsdAnalystPage: React.FC = () => {
       <Header />
       <Box sx={{ p: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h5" fontWeight="bold" color="#1a237e">
-            Аналитика ПСД
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="h5" fontWeight="bold" color="#1a237e">
+              Аналитика ПСД
+            </Typography>
+
+            <Divider orientation="vertical" flexItem sx={{ mx: 1, height: 24, alignSelf: 'center' }} />
+
+            <ToggleButtonGroup
+              size="small"
+              value={assignedToMe}
+              exclusive
+              onChange={(_, v) => v !== null && setAssignedToMe(v)}
+              sx={{ bgcolor: 'white' }}
+            >
+                <ToggleButton value={false} sx={{ px: 2, textTransform: 'none', gap: 1 }}>
+                    <GroupIcon fontSize="small" /> Все проекты
+                </ToggleButton>
+                <ToggleButton value={true} sx={{ px: 2, textTransform: 'none', gap: 1 }}>
+                    <PersonOutlineIcon fontSize="small" /> Мои
+                </ToggleButton>
+            </ToggleButtonGroup>
+
+            <FormControlLabel
+              control={
+                <Switch 
+                  checked={showTests} 
+                  onChange={(e) => setShowTests(e.target.checked)} 
+                  color="warning" 
+                  size="small"
+                />
+              }
+              label={
+                <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', color: showTests ? 'warning.main' : 'text.secondary' }}>
+                  Тестовые
+                </Typography>
+              }
+              sx={{ ml: 1, bgcolor: showTests ? '#fff3e0' : 'transparent', px: 1.5, borderRadius: 5, py: 0.2, border: '1px solid', borderColor: showTests ? 'warning.light' : 'transparent' }}
+            />
+          </Box>
+          
           <Stack direction="row" spacing={1}>
+            <Button 
+                size="small" 
+                variant="outlined" 
+                color="warning"
+                startIcon={<ScienceIcon />} 
+                onClick={() => setUploadDialogOpen(true)}
+                sx={{ bgcolor: 'white', textTransform: 'none' }}>
+              Создать тест
+            </Button>
             <Button size="small" variant="outlined" startIcon={<RefreshIcon />} onClick={loadDocuments}
               sx={{ bgcolor: 'white', textTransform: 'none' }}>
               Обновить
@@ -391,34 +521,101 @@ const PsdAnalystPage: React.FC = () => {
               <TableHead sx={{ bgcolor: '#fafafa' }}>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 'bold' }}>ID</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Заказчик</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Дата</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Наименование / Отправитель</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Аналитик</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Рабочих дней</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Статус</TableCell>
                   <TableCell align="right" sx={{ fontWeight: 'bold' }}>Действие</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {documents.map(doc => (
-                  <TableRow key={doc.id} hover>
-                    <TableCell>#{doc.id}</TableCell>
-                    <TableCell>{doc.bank_name}</TableCell>
-                    <TableCell>{new Date(doc.received_at).toLocaleDateString()}</TableCell>
-                    <TableCell><Chip label={doc.status} size="small" variant="outlined" /></TableCell>
-                    <TableCell align="right">
-                      {!doc.assigned_to ? (
-                        <Button size="small" variant="contained"
-                          onClick={() => api.post(`/psd-analyst/documents/${doc.id}/assign`).then(loadDocuments)}>
-                          Взять
-                        </Button>
-                      ) : (
-                        <Button size="small" variant="outlined"
-                          onClick={() => { setSelectedDoc(doc); setActiveTab(1); }}>
-                          Открыть
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {documents.map(doc => {
+                  const days = calculateWorkingDays(doc.received_at, doc.completed_at || new Date());
+                  const isOverdue = days > 10 && doc.status !== 'COMPLETED';
+                  
+                  return (
+                    <TableRow key={doc.id} hover sx={{ bgcolor: doc.is_test ? '#fffef0' : 'inherit' }}>
+                      <TableCell>#{doc.id}</TableCell>
+                      <TableCell>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  {doc.is_test && <ScienceIcon sx={{ fontSize: 16, color: 'warning.main' }} />}
+                                  <Typography variant="body2" fontWeight="bold">{doc.bank_name}</Typography>
+                              </Box>
+                              {(doc.sender_last_name || doc.sender_first_name) && (
+                                  <Tooltip title={`${doc.sender_last_name || ''} ${doc.sender_first_name || ''} ${doc.sender_patronymic || ''}`}>
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                          <PersonIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+                                          <Typography variant="caption" color="text.secondary">
+                                              {doc.sender_last_name} {doc.sender_first_name?.charAt(0)}.
+                                          </Typography>
+                                      </Box>
+                                  </Tooltip>
+                              )}
+                          </Box>
+                      </TableCell>
+                      <TableCell>
+                          {doc.assigned_user_name ? (
+                              <Chip 
+                                  size="small" 
+                                  icon={<PersonIcon sx={{ fontSize: '14px !important' }} />} 
+                                  label={doc.assigned_user_name} 
+                                  variant="outlined"
+                                  color="primary"
+                                  sx={{ borderRadius: 1 }}
+                              />
+                          ) : (
+                              <Typography variant="caption" color="text.disabled">Не назначен</Typography>
+                          )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                            icon={<AccessTimeIcon sx={{ fontSize: '14px !important' }} />}
+                            label={`${days} раб. дн.`} 
+                            color={isOverdue ? 'error' : 'default'} 
+                            variant={isOverdue ? 'filled' : 'outlined'}
+                            size="small" 
+                            sx={{ fontWeight: 'bold' }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                            label={doc.status} 
+                            size="small" 
+                            variant="outlined" 
+                            color={doc.status === 'ERROR' ? 'error' : (doc.status === 'COMPLETED' ? 'success' : 'default')} 
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Stack direction="row" spacing={1} justifyContent="flex-end">
+                          {!doc.assigned_to ? (
+                              <Button size="small" variant="contained" startIcon={<AssignIcon />}
+                              onClick={() => api.post(`/psd-analyst/documents/${doc.id}/assign`).then(loadDocuments)}>
+                              Взять в работу
+                              </Button>
+                          ) : (
+                              <Button size="small" variant="outlined"
+                              onClick={() => { setSelectedDoc(doc); setActiveTab(1); }}>
+                              Открыть
+                              </Button>
+                          )}
+                          <IconButton size="small" color="error" onClick={() => handleDeleteDocument(doc.id)}>
+                              <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {documents.length === 0 && (
+                    <TableRow>
+                        <TableCell colSpan={6} align="center" sx={{ py: 5 }}>
+                            <Typography color="text.secondary">
+                                {assignedToMe ? 'У вас нет проектов в работе' : (showTests ? 'Тестовые проекты не найдены' : 'Документы не найдены')}
+                            </Typography>
+                        </TableCell>
+                    </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -426,11 +623,49 @@ const PsdAnalystPage: React.FC = () => {
 
         {activeTab === 1 && selectedDoc && (
           <Box>
-            <Paper sx={{ p: 1.5, mb: 2, display: 'flex', gap: 2, alignItems: 'center', borderRadius: 2, flexWrap: 'wrap' }}>
-              <Typography variant="subtitle2" fontWeight="bold">
-                #{selectedDoc.id} {selectedDoc.bank_name}
-              </Typography>
+            <Paper sx={{ 
+                p: 1.5, mb: 2, display: 'flex', gap: 2, alignItems: 'center', 
+                borderRadius: 2, flexWrap: 'wrap',
+                borderLeft: selectedDoc.is_test ? '6px solid #ffa000' : 'none'
+            }}>
+              <Box>
+                <Typography variant="subtitle2" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {selectedDoc.is_test && <ScienceIcon sx={{ fontSize: 18, color: 'warning.main' }} />}
+                    #{selectedDoc.id} {selectedDoc.bank_name}
+                </Typography>
+                {selectedDoc.is_test ? (
+                    <Typography variant="caption" color="warning.dark" sx={{ fontWeight: 'bold' }}>
+                        ТЕСТОВЫЙ РЕЖИМ (ДЛЯ СЕБЯ)
+                    </Typography>
+                ) : (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                         {selectedDoc.sender_last_name && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <PersonIcon sx={{ fontSize: 12 }} /> 
+                                {selectedDoc.sender_last_name} {selectedDoc.sender_first_name}
+                            </Typography>
+                         )}
+                         {selectedDoc.sender_phone && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <PhoneIcon sx={{ fontSize: 12 }} /> {selectedDoc.sender_phone}
+                            </Typography>
+                         )}
+                    </Box>
+                )}
+              </Box>
+              
               <Divider orientation="vertical" flexItem />
+              
+              <Chip 
+                label={`Позиций: ${totalCount}`} 
+                size="small" 
+                color="primary" 
+                variant="outlined" 
+                sx={{ fontWeight: 'bold' }} 
+              />
+              
+              <Divider orientation="vertical" flexItem />
+
               {totalCount === 0 ? (
                 <Button size="small" variant="contained" color="warning" onClick={handleParse} disabled={parsing}>
                   {parsing ? 'Загрузка...' : 'Распарсить'}
@@ -446,7 +681,9 @@ const PsdAnalystPage: React.FC = () => {
                     onClick={() => { setOnlyUnmatched(!onlyUnmatched); setPage(1); }}>
                     Несопоставленные
                   </Button>
+                  
                   <Box sx={{ flexGrow: 1 }} />
+                  
                   <Stack direction="row" spacing={1}>
                     <Button
                       size="small"
@@ -468,8 +705,26 @@ const PsdAnalystPage: React.FC = () => {
                       onClick={() => handleExportFullReport(selectedDoc.id)}
                       sx={{ textTransform: 'none' }}
                     >
-                      Выгрузить отчет
+                      Отчет (Excel)
                     </Button>
+                    
+                    {!selectedDoc.is_test && selectedDoc.status !== 'COMPLETED' && (
+                        <Button
+                            size="small"
+                            variant="contained"
+                            color="primary"
+                            startIcon={finishLoading ? <CircularProgress size={16} color="inherit" /> : <CheckCircleIcon />}
+                            disabled={finishLoading}
+                            onClick={handleFinishAnalysis}
+                            sx={{ textTransform: 'none' }}
+                        >
+                            Завершить и отправить
+                        </Button>
+                    )}
+                    
+                    {selectedDoc.status === 'COMPLETED' && (
+                        <Chip icon={<CheckCircleIcon />} label="Анализ завершен" color="success" />
+                    )}
                   </Stack>
                 </>
               )}
@@ -584,7 +839,7 @@ const PsdAnalystPage: React.FC = () => {
                       </Tooltip>
                     </TableCell>
                     <TableCell>
-                      <Chip label={`${item.dvc_percent}%`} size="small" variant="outlined" sx={{ height: 20 }} />
+                      <Chip label={`${item.dvc_percent}% ДВС`} size="small" variant="outlined" sx={{ height: 20 }} />
                     </TableCell>
                     <TableCell align="right">
                       <IconButton size="small" color="error" onClick={() => removeFromLibrary(item.id)}>
@@ -597,6 +852,56 @@ const PsdAnalystPage: React.FC = () => {
             </Table>
           </TableContainer>
         )}
+
+        {/* ДИАЛОГ ЗАГРУЗКИ ТЕСТА */}
+        <Dialog open={uploadDialogOpen} onClose={() => !uploading && setUploadDialogOpen(false)} maxWidth="xs" fullWidth>
+            <DialogTitle sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <ScienceIcon color="warning" />
+                Новый тестовый проект
+            </DialogTitle>
+            <DialogContent>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+                    Тестовый проект создается для личного анализа. Библиотека сопоставлений будет пополняться как обычно.
+                </Typography>
+                <TextField
+                    fullWidth
+                    label="Название проекта"
+                    placeholder="Напр. Анализ ПСД школы..."
+                    value={testProjectName}
+                    onChange={(e) => setTestProjectName(e.target.value)}
+                    sx={{ mb: 3, mt: 1 }}
+                    size="small"
+                />
+                
+                <Button
+                    component="label"
+                    variant="outlined"
+                    fullWidth
+                    startIcon={<UploadIcon />}
+                    sx={{ py: 2, borderStyle: 'dashed' }}
+                >
+                    {selectedFile ? selectedFile.name : 'Выбрать файл .kenml / .zip'}
+                    <input
+                        type="file"
+                        hidden
+                        accept=".kenml,.zip"
+                        onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    />
+                </Button>
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+                <Button onClick={() => setUploadDialogOpen(false)} disabled={uploading}>Отмена</Button>
+                <Button 
+                    variant="contained" 
+                    color="warning" 
+                    onClick={handleUploadTest}
+                    disabled={uploading || !selectedFile || !testProjectName}
+                    startIcon={uploading && <CircularProgress size={16} color="inherit" />}
+                >
+                    {uploading ? 'Загрузка...' : 'Создать'}
+                </Button>
+            </DialogActions>
+        </Dialog>
 
         <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)}
           maxWidth="xl" fullWidth
@@ -676,15 +981,24 @@ const PsdAnalystPage: React.FC = () => {
                         p: 1.5, mb: 1.5, border: '1px dashed #1976d2',
                         borderRadius: 2, bgcolor: '#f0f7ff', width: '100%'
                       }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                          <Typography sx={{ fontSize: '0.75rem', fontWeight: 'bold' }}>
-                            <Highlight text={rec.enstru_code} search={reestrSearch} />
+                        <Box sx={{ mb: 1 }}>
+                          <Typography sx={{ fontSize: '0.8rem', fontWeight: '800', color: '#1a237e', mb: 0.5, lineHeight: 1.2 }}>
+                            <Highlight text={rec.enstru_name} search={reestrSearch} />
                           </Typography>
-                          <Typography sx={{ fontSize: '0.7rem', color: '#1976d2' }}>{rec.score}%</Typography>
+                          
+                          {rec.product && (
+                            <Typography sx={{ fontSize: '0.65rem', color: '#455a64', mb: 1, fontStyle: 'italic', wordBreak: 'break-word' }}>
+                              <Highlight text={rec.product} search={reestrSearch} />
+                            </Typography>
+                          )}
+
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+                            <Typography sx={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'primary.main', bgcolor: '#e3f2fd', px: 1, borderRadius: 1 }}>
+                              <Highlight text={rec.enstru_code} search={reestrSearch} />
+                            </Typography>
+                            <Typography sx={{ fontSize: '0.7rem', color: '#1976d2', fontWeight: 'bold' }}>{rec.score}%</Typography>
+                          </Box>
                         </Box>
-                        <Typography sx={{ fontSize: '0.65rem', color: '#1e3a8a', mb: 0.5, wordBreak: 'break-word', lineHeight: 1.3 }}>
-                          <Highlight text={rec.enstru_name} search={reestrSearch} />
-                        </Typography>
 
                         {rec.agsk3_codes?.length > 0 && (
                           <AgskChips
@@ -694,15 +1008,9 @@ const PsdAnalystPage: React.FC = () => {
                           />
                         )}
 
-                        {rec.product && (
-                          <Typography sx={{ fontSize: '0.6rem', color: '#64748b', mt: 0.5, fontStyle: 'italic' }}>
-                            <Highlight text={rec.product} search={reestrSearch} />
-                          </Typography>
-                        )}
-
                         <Button size="small" fullWidth variant="outlined"
                           onClick={() => addToLibrary(rec, 'rec')}
-                          sx={{ fontSize: '0.65rem', textTransform: 'none', py: 0.5, mt: 1 }}>
+                          sx={{ fontSize: '0.65rem', textTransform: 'none', py: 0.5, mt: 1.5 }}>
                           Добавить в библиотеку
                         </Button>
                       </Paper>
@@ -828,7 +1136,7 @@ const PsdAnalystPage: React.FC = () => {
 
                           {r.agsk3_codes && r.agsk3_codes.length > 0 && (
                             <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #f0f0f0' }}>
-                              <Typography sx={{ fontSize: '0.6rem', color: '#90a4ae', mb: 0.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              <Typography sx={{ fontSize: '0.65rem', color: '#90a4ae', mb: 0.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                                 АГСК-коды в реестре:
                               </Typography>
                               <AgskChips
