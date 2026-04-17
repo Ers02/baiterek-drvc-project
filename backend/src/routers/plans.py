@@ -14,8 +14,7 @@ from ..models.models import UserRole
 
 router = APIRouter(
     prefix="/plans",
-    tags=["Procurement Plans & Versions"],
-    dependencies=[Depends(get_current_user)]
+    tags=["Procurement Plans & Versions"]
 )
 
 

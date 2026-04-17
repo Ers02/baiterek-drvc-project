@@ -5,7 +5,7 @@ import {
   DialogTitle, DialogContent, TextField, DialogActions, Tooltip,
   Pagination, Divider, Card, CardContent, InputAdornment,
   LinearProgress, CircularProgress, Stack, FormControlLabel, Switch,
-  Avatar, ToggleButton, ToggleButtonGroup
+  Avatar, ToggleButtonGroup, ToggleButton
 } from '@mui/material';
 import {
   Delete as DeleteIcon, Download as DownloadIcon,
@@ -531,8 +531,17 @@ const PsdAnalystPage: React.FC = () => {
               <TableBody>
                 {documents.map(doc => {
                   const days = calculateWorkingDays(doc.received_at, doc.completed_at || new Date());
-                  const isOverdue = days > 10 && doc.status !== 'COMPLETED';
                   
+                  // Логика цвета для рабочих дней:
+                  // 10+ дней -> красный (error)
+                  // 7-9 дней -> оранжевый (warning)
+                  // остальное -> стандартный (default)
+                  let color: 'error' | 'warning' | 'default' = 'default';
+                  if (doc.status !== 'COMPLETED') {
+                      if (days >= 10) color = 'error';
+                      else if (days >= 7) color = 'warning';
+                  }
+
                   return (
                     <TableRow key={doc.id} hover sx={{ bgcolor: doc.is_test ? '#fffef0' : 'inherit' }}>
                       <TableCell>#{doc.id}</TableCell>
@@ -570,10 +579,10 @@ const PsdAnalystPage: React.FC = () => {
                       </TableCell>
                       <TableCell>
                         <Chip 
-                            icon={<AccessTimeIcon sx={{ fontSize: '14px !important' }} />}
+                            icon={<AccessTimeIcon />}
                             label={`${days} раб. дн.`} 
-                            color={isOverdue ? 'error' : 'default'} 
-                            variant={isOverdue ? 'filled' : 'outlined'}
+                            color={color} 
+                            variant={color !== 'default' ? 'filled' : 'outlined'}
                             size="small" 
                             sx={{ fontWeight: 'bold' }}
                         />
@@ -609,9 +618,9 @@ const PsdAnalystPage: React.FC = () => {
                 })}
                 {documents.length === 0 && (
                     <TableRow>
-                        <TableCell colSpan={6} align="center" sx={{ py: 5 }}>
+                        <TableCell colSpan={7} align="center" sx={{ py: 5 }}>
                             <Typography color="text.secondary">
-                                {assignedToMe ? 'У вас нет проектов в работе' : (showTests ? 'Тестовые проекты не найдены' : 'Документы не найдены')}
+                                {assignedToMe ? 'У вас нет проектов в работу' : (showTests ? 'Тестовые проекты не найдены' : 'Документы не найдены')}
                             </Typography>
                         </TableCell>
                     </TableRow>
