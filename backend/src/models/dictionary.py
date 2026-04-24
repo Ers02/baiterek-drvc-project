@@ -94,4 +94,37 @@ class Reestr_KTP(Base):
     __table_args__ = (
         Index('idx_reestr_ktp_agsk3_codes', "agsk3_codes", postgresql_using='gin'),
         Index('idx_reestr_ktp_enstru_codes', "enstru_codes", postgresql_using='gin'),
+        Index('idx_reestr_ktp_oked_codes', "oked_codes", postgresql_using='gin'),
+        Index('idx_reestr_ktp_kpved_codes', "kpved_codes", postgresql_using='gin'),
+        Index('idx_reestr_ktp_tnved_codes', "tnved_codes", postgresql_using='gin'),
     )
+
+
+class Oked(Base):
+    __tablename__ = "oked"
+    id = Column(Integer, primary_key=True)
+    code = Column(String(50), nullable=True)
+    name_kz = Column(String(512), nullable=True)
+    name_ru = Column(String(512), nullable=True)
+    parent_identificator = Column(String(50), nullable=True)
+
+
+class Kpved(Base):
+    __tablename__ = "kpved"
+    id = Column(Integer, primary_key=True)
+    code = Column(String(50), nullable=True)
+    name_kz = Column(String(1024), nullable=True)
+    name_ru = Column(String(1024), nullable=True)
+    parent_identificator = Column(String(50), nullable=True)
+
+
+class Tnved(Base):
+    __tablename__ = "tnved"
+    id = Column(Integer, primary_key=True)
+    code = Column(String(20), nullable=True)
+    tree_name = Column(Text, nullable=True)
+    name = Column(Text, nullable=True)
+    parent_id = Column(Integer, nullable=True)
+    is_last = Column(Boolean, nullable=True)
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)

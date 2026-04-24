@@ -2,7 +2,8 @@ import axios from 'axios';
 import type {
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
     NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
-    Execution, ExecutionPayload, KtpSupplier
+    Execution, ExecutionPayload, KtpSupplier,
+    ProductGroup, ProductGroupListItem, ProductGroupCreate, ReestrKtpItem
 } from './api.types';
 import { PlanStatus } from './api.types';
 
@@ -48,6 +49,40 @@ export const getEnstru = (q?: string): Promise<Enstru[]> => api.get('/lookups/en
 export const checkKtp = (enstruCode: string): Promise<{ is_ktp: boolean }> => api.get(`/lookups/check-ktp/${enstruCode}`).then(res => res.data);
 export const getKtpSuppliers = (enstruCode: string): Promise<KtpSupplier[]> => api.get(`/lookups/ktp-suppliers/${enstruCode}`).then(res => res.data);
 export const getSupplierByBin = (bin: string, enstruCode?: string): Promise<KtpSupplier[]> => api.get(`/lookups/supplier-by-bin/${bin}`, { params: { enstru_code: enstruCode } }).then(res => res.data);
+
+// Новые справочники для поиска КТП
+import type { Oked, Kpved, Tnved, KtpSearchResult } from './api.types';
+export const getOked = (q?: string): Promise<Oked[]> => api.get('/lookups/oked', { params: { q } }).then(res => res.data);
+export const getKpved = (q?: string): Promise<Kpved[]> => api.get('/lookups/kpved', { params: { q } }).then(res => res.data);
+export const getTnved = (q?: string): Promise<Tnved[]> => api.get('/lookups/tnved', { params: { q } }).then(res => res.data);
+
+// Расширенный поиск КТП с фильтрами
+export const searchKtpAdvanced = (
+    params: {
+        q?: string;
+        oked_codes?: string[];
+        kpved_codes?: string[];
+        tnved_codes?: string[];
+        enstru_codes?: string[];
+        agsk3_codes?: string[];
+        search_mode?: string;
+        skip?: number;
+        limit?: number;
+    }
+): Promise<{ total: number; items: KtpSearchResult[] }> => {
+    const queryParams: any = {
+        q: params.q,
+        search_mode: params.search_mode || 'all',
+        skip: params.skip || 0,
+        limit: params.limit || 25,
+    };
+    if (params.oked_codes && params.oked_codes.length > 0) queryParams.oked_codes = JSON.stringify(params.oked_codes);
+    if (params.kpved_codes && params.kpved_codes.length > 0) queryParams.kpved_codes = JSON.stringify(params.kpved_codes);
+    if (params.tnved_codes && params.tnved_codes.length > 0) queryParams.tnved_codes = JSON.stringify(params.tnved_codes);
+    if (params.enstru_codes && params.enstru_codes.length > 0) queryParams.enstru_codes = JSON.stringify(params.enstru_codes);
+    if (params.agsk3_codes && params.agsk3_codes.length > 0) queryParams.agsk3_codes = JSON.stringify(params.agsk3_codes);
+    return api.get('/lookups/search-ktp-advanced', { params: queryParams }).then(res => res.data);
+};
 
 
 // --- API для Планов (ProcurementPlan) ---
@@ -188,7 +223,8 @@ export const uploadExternalDoc = (
     senderLastName?: string,
     senderPatronymic?: string,
     senderEmail?: string,
-    senderPhone?: string
+    senderPhone?: string,
+    externalId?: string
 ): Promise<any> => {
     const formData = new FormData();
     formData.append('file', file);
@@ -201,6 +237,7 @@ export const uploadExternalDoc = (
     if (senderPatronymic) formData.append('sender_patronymic', senderPatronymic);
     if (senderEmail) formData.append('sender_email', senderEmail);
     if (senderPhone) formData.append('sender_phone', senderPhone);
+    if (externalId) formData.append('external_id', externalId);
 
     return api.post('/admin/external/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -231,10 +268,28 @@ export const uploadEstimateTemplate = (file: File): Promise<{ message: string }>
 export const getEstimateAnalysis = (): Promise<any> => api.get('/admin/estimate-analysis').then(res => res.data);
 
 
+// --- API для библиотеки групп/товаров ---
+export const getProductGroups = (): Promise<ProductGroupListItem[]> =>
+    api.get('/product-groups').then(res => res.data);
+
+export const getProductGroup = (id: number): Promise<ProductGroup> =>
+    api.get(`/product-groups/${id}`).then(res => res.data);
+
+export const createProductGroup = (data: ProductGroupCreate): Promise<ProductGroup> =>
+    api.post('/product-groups', data).then(res => res.data);
+
+export const updateProductGroup = (id: number, data: ProductGroupCreate): Promise<ProductGroup> =>
+    api.put(`/product-groups/${id}`, data).then(res => res.data);
+
+export const deleteProductGroup = (id: number): Promise<{ status: string }> =>
+    api.delete(`/product-groups/${id}`).then(res => res.data);
+
+
 export default api;
 export { PlanStatus };
 export type {
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
     NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
-    Execution, ExecutionPayload, KtpSupplier
+    Execution, ExecutionPayload, KtpSupplier, Oked, Kpved, Tnved, KtpSearchResult,
+    ProductGroup, ProductGroupListItem, ProductGroupCreate
 }

@@ -1,11 +1,13 @@
 from .user import User, UserRole
 from .plan import ProcurementPlan, ProcurementPlanVersion, PlanItemVersion, PlanItemExecution, PlanStatus, NeedType
-from .dictionary import Mkei, Kato, Agsk, Cost_Item, Source_Funding, Enstru, Reestr_KTP
+from .dictionary import Mkei, Kato, Agsk, Cost_Item, Source_Funding, Enstru, Reestr_KTP, Oked, Kpved, Tnved
 from .psd import ExternalDocument, PsdDocumentItem, AgskReestrKtpMatch, PsdAnalysisSession, AdminTask
+from .product_group import ProductGroup, ProductGroupSet, ProductGroupSetItem
 
 __all__ = [
     "User", "UserRole", "ProcurementPlan", "ProcurementPlanVersion", "PlanItemVersion",
-    "PlanItemExecution", "PlanStatus", "NeedType", "Enstru", "Mkei", "Kato", "Agsk", 
-    "Cost_Item", "Source_Funding", "Reestr_KTP", "AdminTask", "ExternalDocument", 
-    "PsdDocumentItem", "AgskReestrKtpMatch", "PsdAnalysisSession"
+    "PlanItemExecution", "PlanStatus", "NeedType", "Enstru", "Mkei", "Kato", "Agsk",
+    "Cost_Item", "Source_Funding", "Reestr_KTP", "AdminTask", "ExternalDocument",
+    "PsdDocumentItem", "AgskReestrKtpMatch", "PsdAnalysisSession", "Oked", "Kpved", "Tnved",
+    "ProductGroup", "ProductGroupSet", "ProductGroupSetItem"
 ]

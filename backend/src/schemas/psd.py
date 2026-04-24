@@ -47,7 +47,11 @@ class ExternalDocumentSchema(BaseModel):
     assigned_to: Optional[int] = None
     assigned_at: Optional[datetime] = None
     assigned_user_name: Optional[str] = None
-    
+
+    # Дедлайн
+    deadline_days: Optional[int] = None
+    deadline_at: Optional[datetime] = None
+
     is_test: bool = False
 
     @field_validator("assigned_user_name", mode="before")

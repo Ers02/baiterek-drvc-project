@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Numeric, Index, UniqueConstraint
+    Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Numeric, Index, UniqueConstraint, Date
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -24,10 +24,19 @@ class ExternalDocument(Base):
 
     received_at = Column(DateTime(timezone=True), nullable=False)
     file_path = Column(String(500), nullable=False)
-    status = Column(String(20), default="NEW")
-    result_file_path = Column(String(500), nullable=True)
+
+    # NEW -> PARSING -> ASSIGNED_TO_ANALYST -> ANALYST_WORKING -> FOR_APPROVAL -> APPROVED -> COMPLETED
+    # REJECTED_BY_DIRECTOR (возвращено аналитику)
+    status = Column(String(50), default="NEW")
+
+    result_file_path = Column(String(500), nullable=True) # Путь к ZIP архиву (отчет + заключение)
     error_message = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    director_comment = Column(Text, nullable=True) # Комментарий директора при возврате на доработку
+
+    deadline_days = Column(Integer, nullable=True) # Срок в рабочих днях
+    deadline_at = Column(DateTime(timezone=True), nullable=True) # Рассчитанная дата дедлайна
+
     completed_at = Column(DateTime(timezone=True), nullable=True)
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
     assigned_at = Column(DateTime(timezone=True), nullable=True)

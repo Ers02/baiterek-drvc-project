@@ -13,6 +13,7 @@ import { Login as LoginIcon } from '@mui/icons-material'
 import api from '../services/api'
 import { useNavigate } from 'react-router-dom'
 import { jwtDecode } from 'jwt-decode'
+import { UserRole } from '../services/api.types'
 
 interface LoginProps {
   setToken: (token: string) => void;
@@ -55,14 +56,17 @@ export default function Login({ setToken }: LoginProps) {
       // Редирект в зависимости от роли
       try {
         const decoded: any = jwtDecode(token);
-        if (decoded.role === 'analyst_drvc') {
+        const role = decoded.role as UserRole;
+        
+        if (role === UserRole.ANALYST_DRVC || role === UserRole.DIRECTOR_DRVC) {
           navigate('/psd-analyst');
-        } else if (decoded.is_admin === true) {
+        } else if (decoded.is_admin === true || role === UserRole.ADMIN) {
           navigate('/admin');
         } else {
           navigate('/');
         }
       } catch (e) {
+        console.error("Redirect error:", e);
         navigate('/');
       }
     } catch (err: any) {

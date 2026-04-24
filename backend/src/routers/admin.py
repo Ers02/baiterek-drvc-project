@@ -9,7 +9,7 @@ from ..database.database import get_db
 from ..models import models
 from ..models.api_key import ApiKey
 from ..schemas import user as user_schema
-from ..utils.auth import get_current_admin_strict
+from ..utils.auth import get_current_admin, get_current_director_or_admin
 from ..services import admin_service, external_service
 from ..core.config import settings
 import secrets
@@ -18,7 +18,7 @@ import hashlib
 router = APIRouter(
     prefix="/admin",
     tags=["Admin Panel"],
-    dependencies=[Depends(get_current_admin_strict)]
+    dependencies=[Depends(get_current_admin)]
 )
 
 @router.get("/users", response_model=List[user_schema.User])
@@ -69,6 +69,7 @@ def upload_external_doc(
     sender_patronymic: Optional[str] = Form(None),
     sender_email: Optional[str] = Form(None),
     sender_phone: Optional[str] = Form(None),
+    external_id: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """Загрузить внешний документ (от банка)."""
@@ -78,7 +79,8 @@ def upload_external_doc(
         sender_last_name=sender_last_name,
         sender_patronymic=sender_patronymic,
         sender_email=sender_email,
-        sender_phone=sender_phone
+        sender_phone=sender_phone,
+        external_id=external_id
     )
 
 @router.get("/external/documents")
@@ -139,7 +141,7 @@ async def get_estimate_analysis_endpoint(
 @router.get("/api-keys")
 def get_all_api_keys(
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_admin_strict),
+    current_user = Depends(get_current_admin),
     skip: int = 0,
     limit: int = 100
 ):
@@ -153,7 +155,7 @@ def create_api_key(
     description: Optional[str] = Form(None),
     expires_at: Optional[str] = Form(None),  # Строка ISO 8601 или null
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_admin_strict)
+    current_user = Depends(get_current_admin)
 ):
     """
     Создать новый API-ключ для дочерней организации.
@@ -204,7 +206,7 @@ def create_api_key(
 def revoke_api_key(
     key_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_admin_strict)
+    current_user = Depends(get_current_admin)
 ):
     """Отозвать (деактивировать) API-ключ."""
     api_key = db.query(ApiKey).filter(ApiKey.id == key_id).first()
@@ -221,7 +223,7 @@ def revoke_api_key(
 def get_api_key_stats(
     key_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_admin_strict)
+    current_user = Depends(get_current_admin)
 ):
     """Получить статистику использования API-ключа."""
     api_key = db.query(ApiKey).filter(ApiKey.id == key_id).first()

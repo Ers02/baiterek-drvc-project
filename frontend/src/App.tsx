@@ -7,6 +7,7 @@ import PlanForm from './pages/PlanForm';
 import PlanItemForm from './pages/PlanItemForm';
 import AdminPage from './pages/AdminPage';
 import PsdAnalystPage from './pages/PsdAnalystPage';
+import KtpSearchPage from './pages/KtpSearchPage';
 
 // Приватный роут для защиты страниц
 const PrivateRoute = ({ children }: { children: JSX.Element }) => {
@@ -21,8 +22,8 @@ const AdminRoute = ({ children }: { children: JSX.Element }) => {
   if (token) {
       try {
           const decoded: any = jwtDecode(token);
-          // Админ или аналитик ДРВЦ имеют доступ к админке
-          hasAdminAccess = decoded.is_admin === true || decoded.role === 'analyst_drvc';
+          // Админ, директор или аналитик ДРВЦ имеют доступ к админке
+          hasAdminAccess = decoded.is_admin === true || decoded.role === 'analyst_drvc' || decoded.role === 'director_drvc';
       } catch (e) {}
   }
 
@@ -36,11 +37,11 @@ const HomeRoute = ({ children }: { children: JSX.Element }) => {
   if (token) {
       try {
           const decoded: any = jwtDecode(token);
-          isAnalyst = decoded.role === 'analyst_drvc';
+          isAnalyst = decoded.role === 'analyst_drvc' || decoded.role === 'director_drvc';
       } catch (e) {}
   }
 
-  // Аналитик ДРВЦ редиректится на /psd-analyst
+  // Аналитик или директор ДРВЦ редиректится на /psd-analyst
   if (isAnalyst) {
       return <Navigate to="/psd-analyst" />;
   }
@@ -97,6 +98,12 @@ function App() {
           path="/psd-analyst"
           element={<PrivateRoute><AdminRoute><PsdAnalystPage /></AdminRoute></PrivateRoute>}
         />
+
+        <Route
+          path="/ktp-search"
+          element={<PrivateRoute><AdminRoute><KtpSearchPage /></AdminRoute></PrivateRoute>}
+        />
+
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </BrowserRouter>

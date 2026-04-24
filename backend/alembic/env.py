@@ -9,7 +9,7 @@ load_dotenv()
 
 # Импортируем Base и модели
 from src.database.base import Base
-from src.models.models import (User, ProcurementPlan,PlanItemVersion,ProcurementPlanVersion, Mkei, Kato, Agsk, Cost_Item, Source_Funding, Enstru, Reestr_KTP)
+from src.models.models import (User, ProcurementPlan,PlanItemVersion,ProcurementPlanVersion, Mkei, Kato, Agsk, Cost_Item, Source_Funding, Enstru, Reestr_KTP, Oked, Kpved, Tnved, ProductGroup, ProductGroupSet, ProductGroupSetItem)
 
 # Это нужно, чтобы Alembic видел все таблицы
 target_metadata = Base.metadata

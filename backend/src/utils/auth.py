@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -75,56 +75,50 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
+def get_current_director_or_admin(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
+    """
+    Проверяет, является ли пользователь директором или админом.
+    Также учитывает делегирование полномочий директора.
+    """
+    if current_user.role in [UserRole.ADMIN, UserRole.DIRECTOR_DRVC]:
+        return current_user
+    
+    # Проверка делегирования: есть ли директор, который делегировал права текущему пользователю
+    now = datetime.now(timezone.utc)
+    delegator = db.query(User).filter(
+        User.role == UserRole.DIRECTOR_DRVC,
+        User.delegated_to_id == current_user.id,
+        User.delegation_start <= now,
+        User.delegation_end >= now
+    ).first()
+    
+    if delegator:
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Требуются права директора ДРВЦ или делегированные полномочия"
+    )
+
+
 def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
     """
     Зависимость для проверки прав администратора (полный контроль).
-    Теперь включает аналитика ДРВЦ для доступа к admin эндпоинтам.
     """
-    if current_user.role in [UserRole.ADMIN, UserRole.ANALYST_DRVC]:
+    if current_user.role in [UserRole.ADMIN, UserRole.DIRECTOR_DRVC, UserRole.ANALYST_DRVC]:
         return current_user
     
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Требуются права администратора или аналитика ДРВЦ"
+        detail="Доступ запрещен"
     )
 
 
 def get_current_analyst_drvc(current_user: User = Depends(get_current_user)) -> User:
-    """
-    Зависимость для проверки прав аналитика ДРВЦ.
-    Аналитик ДРВЦ имеет полные права на управление планами и позициями.
-    """
     if current_user.role == UserRole.ANALYST_DRVC:
         return current_user
     
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Требуются права аналитика ДРВЦ"
-    )
-
-
-def get_current_admin_or_analyst(current_user: User = Depends(get_current_user)) -> User:
-    """
-    Зависимость для проверки прав администратора или аналитика ДРВЦ.
-    """
-    if current_user.role in [UserRole.ADMIN, UserRole.ANALYST_DRVC]:
-        return current_user
-    
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Требуются права администратора или аналитика ДРВЦ"
-    )
-
-
-def get_current_admin_strict(current_user: User = Depends(get_current_user)) -> User:
-    """
-    Строгая зависимость только для администратора (ADMIN).
-    Не допускает аналитика ДРВЦ.
-    """
-    if current_user.role == UserRole.ADMIN:
-        return current_user
-    
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Требуются права администратора"
     )

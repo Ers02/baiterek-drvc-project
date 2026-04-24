@@ -3,7 +3,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_, and_, String, desc, text, cast, case
 from typing import List, Optional, Dict, Any, Literal, Union
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 import os
 import re
@@ -17,7 +17,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from ..models.models import (
     AgskReestrKtpMatch, PsdDocumentItem,
-    ExternalDocument, Reestr_KTP, Agsk, Enstru, PsdAnalysisSession, User
+    ExternalDocument, Reestr_KTP, Agsk, Enstru, PsdAnalysisSession, User, UserRole
 )
 from ..utils.text_utils import tokenize, score_pair
 
@@ -27,6 +27,108 @@ SearchMode = Literal["all", "agsk", "name"]
 
 class PsdAnalystService:
     """Сервис для работы аналитика ПСД: КТП-центричная модель"""
+
+    @staticmethod
+    def _calculate_deadline(start_date: datetime, business_days: int) -> datetime:
+        """Рассчитывает дату дедлайна, пропуская выходные (суббота, воскресенье)."""
+        current_date = start_date
+        added_days = 0
+        while added_days < business_days:
+            current_date += timedelta(days=1)
+            if current_date.weekday() < 5:  # 0-4 это Пн-Пт
+                added_days += 1
+        return current_date
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Workflow Методы (Директор / Аналитик)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def assign_to_analyst(self, db: Session, doc_id: int, analyst_id: int, deadline_days: int):
+        doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
+        if not doc:
+            raise ValueError("Документ не найден")
+
+        # Назначаем на текущий документ
+        doc.assigned_to = analyst_id
+        doc.assigned_at = func.now()
+        doc.deadline_days = deadline_days
+        doc.deadline_at = self._calculate_deadline(datetime.now(), deadline_days)
+        doc.status = "ASSIGNED_TO_ANALYST"
+
+        # Авто-назначение на все документы с тем же external_id + bank_name
+        if doc.external_id and doc.bank_name:
+            related_docs = db.query(ExternalDocument).filter(
+                ExternalDocument.bank_name == doc.bank_name,
+                ExternalDocument.external_id == doc.external_id,
+                ExternalDocument.id != doc_id,
+                ExternalDocument.assigned_to.is_(None)  # Только не назначенные
+            ).all()
+
+            for related in related_docs:
+                related.assigned_to = analyst_id
+                related.assigned_at = func.now()
+                related.deadline_days = deadline_days
+                related.deadline_at = doc.deadline_at
+                related.status = "ASSIGNED_TO_ANALYST"
+
+        db.commit()
+        return doc
+
+    def submit_for_approval(self, db: Session, doc_id: int):
+        doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
+        if not doc:
+            raise ValueError("Документ не найден")
+
+        doc.status = "FOR_APPROVAL"
+        db.commit()
+        return doc
+
+    def approve_document(self, db: Session, doc_id: int, director: User):
+        doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
+        if not doc:
+            raise ValueError("Документ не найден")
+
+        doc.status = "APPROVED"
+
+        # Генерируем финальный пакет (ZIP)
+        excel_path = self.export_full_analysis_report(db, doc_id)
+        docx_path = self.generate_psd_conclusion_docx(db, doc_id, doc.assigned_user or director)
+
+        zip_filename = f"result_{doc_id}_{uuid.uuid4().hex[:8]}.zip"
+        zip_path = os.path.join("/tmp", zip_filename)
+
+        with zipfile.ZipFile(zip_path, 'w') as zf:
+            if excel_path and os.path.exists(excel_path):
+                zf.write(excel_path, arcname=f"report_{doc_id}.xlsx")
+            if docx_path and os.path.exists(docx_path):
+                zf.write(docx_path, arcname=f"conclusion_{doc_id}.docx")
+
+        doc.result_file_path = zip_path
+        doc.status = "COMPLETED"
+        doc.completed_at = func.now()
+        db.commit()
+        return doc
+
+    def reject_document(self, db: Session, doc_id: int, comment: str):
+        doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
+        if not doc:
+            raise ValueError("Документ не найден")
+
+        doc.status = "REJECTED_BY_DIRECTOR"
+        doc.director_comment = comment
+        db.commit()
+        return doc
+
+    def delegate_authority(self, db: Session, from_user_id: int, to_user_id: int, days: int):
+        user = db.query(User).filter(User.id == from_user_id).first()
+        if not user:
+            raise ValueError("Пользователь не найден")
+
+        user.delegated_to_id = to_user_id
+        user.delegation_start = func.now()
+        user.delegation_end = datetime.now() + timedelta(days=days)
+        db.commit()
+        return user
 
     # ─────────────────────────────────────────────────────────────────────────
     # Вспомогательный: формирует dict из Reestr_KTP + пары (code, name)
@@ -82,7 +184,8 @@ class PsdAnalystService:
     def _run_auto_matching_for_document(self, db: Session, doc_id: int):
         """
         Для каждой позиции документа ищет сопоставление через AgskEnstruMatcher.
-        Логика: Библиотека замен -> Точное совпадение АГСК в КТП -> Совпадение по группе АГСК.
+        Логика: Библиотека замен -> Точное совпадение АГСК в КТП (только 100% match).
+        Сопоставление по группе/родительскому коду удалено — аналитик делает это вручную.
         """
         from .agsk_enstru_matcher import AgskEnstruMatcher
         matcher = AgskEnstruMatcher(db)
@@ -451,10 +554,109 @@ class PsdAnalystService:
             ))
         db.commit()
         doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
-        if doc:
+        if doc and doc.status != "ASSIGNED_TO_ANALYST":
             doc.status = "PARSED"
             db.commit()
         self._run_auto_matching_for_document(db, doc_id)
+
+    def parse_smeta_file(self, db: Session, doc_id: int, file_path: str):
+        """
+        Парсинг файла сметы .xlsx (шаблон импорта).
+        Сохраняет позиции в PsdDocumentItem.
+        """
+        import openpyxl
+        from .importers.excel_importer import extract_code
+
+        # Читаем Excel файл
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        ws = wb["Позиции для загрузки"] if "Позиции для загрузки" in wb.sheetnames else wb.active
+
+        # Удаляем старые позиции документа
+        db.query(PsdDocumentItem).filter(PsdDocumentItem.document_id == doc_id).delete()
+
+        position_idx = 1
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            # Пропускаем пустые строки
+            if not any(cell is not None and str(cell).strip() for cell in row):
+                continue
+
+            # Дополняем row до 17 колонок
+            row_data = list(row) + [None] * max(0, 17 - len(row))
+
+            # Извлекаем данные по структуре шаблона сметы
+            # A=0: №, B=1: Код ЕНС ТРУ, C=2: Наименование ТРУ, D=3: Доп.хар-ка рус
+            # E=4: Доп.хар-ка каз, F=5: Ед.изм, G=6: Количество, H=7: Цена
+            # I=8: Сумма, J=9: Место закупки КАТО, K=10: Место поставки КАТО
+            # L=11: Статья затрат, M=12: Источник финансирования
+            # N=13: Код АГСК, O=14: Доля ВЦ, P=15: Обоснование, Q=16: Сумма ВЦ
+
+            enstru_code = str(row_data[1]).strip() if row_data[1] else None
+            name = str(row_data[3]).strip() if row_data[3] else None  # Доп.хар-ка рус
+            if not name:
+                name = str(row_data[2]).strip() if row_data[2] else f"Позиция {position_idx}"
+
+            unit = str(row_data[5]).strip() if row_data[5] else ""
+            agsk_code = str(row_data[13]).strip() if row_data[13] else None
+
+            # Если АГСК == "Прайс-лист" - считаем что кода нет
+            if agsk_code and agsk_code.lower() == "прайс-лист":
+                agsk_code = None
+
+            # Числовые поля
+            try:
+                volume = float(row_data[6]) if row_data[6] is not None else 0.0
+            except (ValueError, TypeError):
+                volume = 0.0
+
+            try:
+                price = float(row_data[7]) if row_data[7] is not None else 0.0
+            except (ValueError, TypeError):
+                price = 0.0
+
+            try:
+                total_amount = float(row_data[8]) if row_data[8] is not None else (volume * price)
+            except (ValueError, TypeError):
+                total_amount = volume * price
+
+            # Доля ВЦ (для сметы берём из столбца O)
+            try:
+                dvc_percent = float(row_data[14]) if row_data[14] is not None else None
+            except (ValueError, TypeError):
+                dvc_percent = None
+
+            # Пропускаем строки без кода ЕНС ТРУ и без названия
+            if not enstru_code and not name:
+                continue
+
+            # Создаем запись в PsdDocumentItem
+            item = PsdDocumentItem(
+                document_id=doc_id,
+                position_number=str(position_idx),
+                name=name,
+                code_sn=agsk_code,  # Для сметы АГСК в code_sn
+                unit=unit,
+                volume=volume,
+                price=price,
+                total_amount=total_amount,
+                clean_name=name.split('/')[0].strip() if '/' in name else name,
+                is_product=True,
+                # Для сметы сразу заполняем enstru_code из файла
+                enstru_code=enstru_code,
+                enstru_name=str(row_data[2]).strip() if row_data[2] else None,
+                match_type="auto" if enstru_code else "none",
+                match_score=100.0 if enstru_code else None,
+                match_reason="Из файла сметы" if enstru_code else None,
+            )
+            db.add(item)
+            position_idx += 1
+
+        db.commit()
+
+        # Обновляем статус документа (только если еще не назначен)
+        doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
+        if doc and doc.status != "ASSIGNED_TO_ANALYST":
+            doc.status = "PARSED"
+            db.commit()
 
     def export_matches_to_excel(self, db: Session, format_type: str = "full"):
         matches = db.query(AgskReestrKtpMatch).filter(AgskReestrKtpMatch.is_active == True).all()
@@ -470,7 +672,7 @@ class PsdAnalystService:
         pd.DataFrame(data).to_excel(path, index=False)
         return {"file_path": path}
 
-    def export_full_analysis_report(self, db: Session, doc_id: Optional[int] = None) -> Optional[str]:
+    def export_full_analysis_report(self, db: Session, doc_id: int) -> Optional[str]:
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
@@ -482,16 +684,13 @@ class PsdAnalystService:
 
         # ── 1. Загружаем позиции документа ───────────────────────────────────
         q = db.query(PsdDocumentItem, Agsk).outerjoin(Agsk, PsdDocumentItem.code_sn == Agsk.code)
-        if doc_id:
-            q = q.filter(PsdDocumentItem.document_id == doc_id)
+        q = q.filter(PsdDocumentItem.document_id == doc_id)
         items_data = q.order_by(PsdDocumentItem.id).all()
 
         if not items_data:
             return None
 
-        doc = None
-        if doc_id:
-            doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
+        doc = db.query(ExternalDocument).filter(ExternalDocument.id == doc_id).first()
 
         agsk_codes = list({item.code_sn for item, _ in items_data if item.code_sn})
         enstru_codes_set = list({item.enstru_code for item, _ in items_data if item.enstru_code})
@@ -532,7 +731,6 @@ class PsdAnalystService:
         wb = openpyxl.Workbook()
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="1B5E20", end_color="1B5E20", fill_type="solid")
-        sub_header_fill = PatternFill(start_color="E8F5E9", end_color="E8F5E9", fill_type="solid")
         border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
         
         # ЛИСТ 1: СМЕТА
@@ -560,10 +758,7 @@ class PsdAnalystService:
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         ws1.row_dimensions[5].height = 45
 
-        ws1.merge_cells('A6:Q6')
-        ws1['A6'] = "1. Товары"; ws1['A6'].font = Font(bold=True, size=12); ws1['A6'].fill = sub_header_fill
-        
-        curr_row = 7; total_sum = Decimal('0'); total_vc_sum = Decimal('0')
+        curr_row = 6; total_sum = Decimal('0'); total_vc_sum = Decimal('0')
         for idx, (item, agsk) in enumerate(items_data, 1):
             dvc_p = Decimal('0')
             if item.match_type in ('auto_ktp', 'auto'):
@@ -589,11 +784,9 @@ class PsdAnalystService:
             curr_row += 1
 
         ws1.merge_cells(f'A{curr_row}:H{curr_row}')
-        ws1.cell(row=curr_row, column=1, value="Итого по товарам:").font = Font(bold=True)
+        ws1.cell(row=curr_row, column=1, value="Итого:").font = Font(bold=True)
         ws1.cell(row=curr_row, column=1).alignment = Alignment(horizontal='right')
         ws1.cell(row=curr_row, column=9, value=float(total_sum)).font = Font(bold=True); ws1.cell(row=curr_row, column=9).number_format = '#,##0.00'
-        avg_vc = (total_vc_sum / total_sum * 100) if total_sum > 0 else 0
-        ws1.cell(row=curr_row, column=16, value=f"{avg_vc:.2f}%").font = Font(bold=True)
         ws1.cell(row=curr_row, column=17, value=float(total_vc_sum)).font = Font(bold=True); ws1.cell(row=curr_row, column=17).number_format = '#,##0.00'
 
         # ЛИСТ 2: АНАЛИЗ ПСД
@@ -742,7 +935,7 @@ class PsdAnalystService:
         
         p = doc.add_paragraph()
         p.add_run('Аналитик: ').bold = True
-        p.add_run(f"{current_user.full_name or current_user.username}")
+        p.add_run(f"{current_user.full_name}")
 
         p = doc.add_paragraph()
         p.add_run('Наименование проекта (Банк): ').bold = True

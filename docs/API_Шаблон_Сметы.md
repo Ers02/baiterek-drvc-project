@@ -118,6 +118,7 @@ with open("filled_import_template.xlsx", "rb") as f:
         data={
             "doc_type": "SMETA",           # <-- обязательно SMETA для Excel-шаблона
             "bank_name": "Название проекта",
+            "external_id": "PRJ-2025-001", # ← номер документа в вашей АИС
             "received_at": datetime.now().isoformat(),
             "sender_last_name": "Фамилия",
             "sender_email": "email@example.kz",
@@ -129,6 +130,35 @@ print(response.json())
 ```
 
 > ⚠️ При загрузке сметы всегда указывайте `doc_type = "SMETA"`.
+
+---
+
+## 🔗 Связь сметы с ПСД
+
+Если у проекта есть и **ПСД**, и **смета** — загрузите их с **одинаковыми** `external_id` и `bank_name`:
+
+```python
+# 1. Загрузка ПСД (KENML/ZIP)
+requests.post(API_URL, data={
+    "doc_type": "PSD",
+    "bank_name": "Школа №15, Алматы",
+    "external_id": "PRJ-2025-001",  # ← ключ связи
+    ...
+}, files={"file": psd_file})
+
+# 2. Загрузка сметы (этот шаблон)
+requests.post(API_URL, data={
+    "doc_type": "SMETA",
+    "bank_name": "Школа №15, Алматы",  # ← тот же банк
+    "external_id": "PRJ-2025-001",  # ← тот же ID
+    ...
+}, files={"file": smeta_file})
+```
+
+**Результат:**
+- Документы сгруппируются в интерфейсе ДРВЦ
+- Аналитик назначается сразу на оба документа
+- Общий дедлайн для всего проекта
 
 ## Контакты
 

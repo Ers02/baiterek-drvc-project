@@ -5,7 +5,7 @@ import {
   DialogTitle, DialogContent, TextField, DialogActions, Tooltip,
   Pagination, Divider, Card, CardContent, InputAdornment,
   LinearProgress, CircularProgress, Stack, FormControlLabel, Switch,
-  Avatar, ToggleButtonGroup, ToggleButton
+  Avatar, ToggleButtonGroup, ToggleButton, Menu, MenuItem, Select, FormControl, InputLabel
 } from '@mui/material';
 import {
   Delete as DeleteIcon, Download as DownloadIcon,
@@ -29,12 +29,23 @@ import {
   PersonOutline as PersonOutlineIcon,
   AccessTime as AccessTimeIcon,
   CheckCircle as CheckCircleIcon,
-  Send as SendIcon
+  Send as SendIcon,
+  MoreVert as MoreVertIcon,
+  ThumbsUpDown as ReviewIcon,
+  Check as ApprovedIcon,
+  Reply as RejectIcon,
+  SwapHoriz as DelegateIcon,
+  History as HistoryIcon,
+  Comment as CommentIcon,
+  ExpandLess as ExpandLessIcon,
+  ExpandMore as ExpandMoreIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n';
 import Header from '../components/Header';
 import api from '../services/api';
 import { calculateWorkingDays } from '../utils/dateUtils';
+import { UserRole } from '../services/api.types'; // Значение для runtime
+import type { User, ExternalDocument, ExternalDocumentStatus } from '../services/api.types'; // Только типы
 
 function useDebounce(value: any, delay: number) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -112,18 +123,32 @@ const SEARCH_TABS: { mode: SearchMode; label: string; placeholder: string }[] = 
 
 const PsdAnalystPage: React.FC = () => {
   const { t } = useTranslation();
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState(0);
-  const [documents, setDocuments] = useState<any[]>([]);
+  const [documents, setDocuments] = useState<ExternalDocument[]>([]);
   const [matches, setMatches] = useState<AgskMatch[]>([]);
   const [archive, setArchive] = useState<LibraryItem[]>([]);
-  const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<ExternalDocument | null>(null);
   const [listLoading, setListLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [docxLoading, setDocxLoading] = useState(false);
-  const [finishLoading, setFinishLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [showTests, setShowTests] = useState(false);
   const [assignedToMe, setAssignedToMe] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  // Состояния для диалогов директора
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [delegateDialogOpen, setDelegateDialogOpen] = useState(false);
+  const [targetDoc, setTargetDoc] = useState<ExternalDocument | null>(null);
+  const [analysts, setAnalysts] = useState<{id: number, full_name: string}[]>([]);
+  const [selectedAnalystId, setSelectedAnalystId] = useState<number | ''>('');
+  const [deadlineDays, setDeadlineDays] = useState(5);
+  const [rejectComment, setRejectComment] = useState('');
+  const [delegateTargetId, setDelegateTargetId] = useState<number | ''>('');
+  const [delegateDays, setDelegateDays] = useState(14);
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingMatch, setEditingMatch] = useState<AgskMatch | null>(null);
@@ -150,7 +175,12 @@ const PsdAnalystPage: React.FC = () => {
 
   const requestCounter = useRef(0);
 
-  useEffect(() => { loadDocuments(); loadArchive(); }, [showTests, assignedToMe]);
+  useEffect(() => {
+      loadCurrentUser();
+      loadDocuments();
+      loadArchive();
+      loadAnalysts();
+  }, [showTests, assignedToMe]);
 
   useEffect(() => {
     if (selectedDoc) loadMatches(selectedDoc.id);
@@ -164,11 +194,28 @@ const PsdAnalystPage: React.FC = () => {
     else if (debouncedReestrSearch.length === 0) setReestrResults([]);
   }, [debouncedReestrSearch, searchMode]);
 
+  const loadCurrentUser = async () => {
+      const res = await api.get('/auth/me');
+      console.log('Current user data:', res.data);
+      console.log('User role:', res.data?.role);
+      setCurrentUser(res.data);
+  };
+
+  const loadAnalysts = async () => {
+      const res = await api.get('/psd-analyst/analysts');
+      setAnalysts(res.data);
+  };
+
   const loadDocuments = async () => {
-    const res = await api.get('/psd-analyst/documents', {
-        params: { is_test: showTests, assigned_to_me: assignedToMe }
-    });
-    setDocuments(res.data);
+    setListLoading(true);
+    try {
+        const res = await api.get('/psd-analyst/documents', {
+            params: { is_test: showTests, assigned_to_me: assignedToMe }
+        });
+        setDocuments(res.data);
+    } finally {
+        setListLoading(false);
+    }
   };
   const loadArchive = async () => {
     const res = await api.get('/psd-analyst/existing-matches');
@@ -198,6 +245,116 @@ const PsdAnalystPage: React.FC = () => {
     }
   };
 
+  // is_director приходит с бэкенда и учитывает делегирование полномочий
+  const isDirector = currentUser?.is_director === true || currentUser?.role === UserRole.ADMIN;
+  // Только настоящий директор (по роли), не делегированный
+  const isRealDirector = currentUser?.role?.toLowerCase() === 'director_drvc' || currentUser?.role === UserRole.ADMIN;
+
+  // --- Действия Workflow ---
+
+  const handleAssignAnalyst = async () => {
+      if (!targetDoc || !selectedAnalystId) return;
+      setActionLoading(true);
+      try {
+          await api.post(`/psd-analyst/documents/${targetDoc.id}/assign-analyst`, null, {
+              params: { analyst_id: selectedAnalystId, days: deadlineDays }
+          });
+          setAssignDialogOpen(false);
+          loadDocuments();
+          alert('Аналитик успешно назначен');
+      } catch (err: any) {
+          alert('Ошибка: ' + (err.response?.data?.detail || err.message));
+      } finally {
+          setActionLoading(false);
+      }
+  };
+
+  const handleSubmitForApproval = async (docId: number) => {
+      if (!window.confirm('Отправить документ на утверждение директору?')) return;
+      setActionLoading(true);
+      try {
+          await api.post(`/psd-analyst/documents/${docId}/submit-approval`);
+          loadDocuments();
+          if (selectedDoc?.id === docId) setSelectedDoc(null);
+          setActiveTab(0);
+          alert('Документ отправлен на утверждение');
+      } finally {
+          setActionLoading(false);
+      }
+  };
+
+  const handleApprove = async (docId: number) => {
+      if (!window.confirm('Вы уверены, что хотите утвердить данный документ? Будет сформирован финальный ZIP-архив.')) return;
+      setActionLoading(true);
+      try {
+          await api.post(`/psd-analyst/documents/${docId}/approve`);
+          loadDocuments();
+          alert('Документ успешно утвержден');
+      } finally {
+          setActionLoading(false);
+      }
+  };
+
+  const handleReject = async () => {
+      if (!targetDoc || !rejectComment) return;
+      setActionLoading(true);
+      try {
+          await api.post(`/psd-analyst/documents/${targetDoc.id}/reject`, { comment: rejectComment });
+          setRejectDialogOpen(false);
+          loadDocuments();
+          alert('Документ возвращен на доработку');
+      } finally {
+          setActionLoading(false);
+      }
+  };
+
+  const handleSendToDo = async (docId: number) => {
+      if (!window.confirm('Отправить результат анализа в дочернюю организацию?\n\nZIP архив с заключением будет отправлен на callback URL, указанный при загрузке документа.')) return;
+      setActionLoading(true);
+      try {
+          const res = await api.post(`/psd-analyst/documents/${docId}/send-to-do`);
+          loadDocuments();
+          alert(`✅ Результат успешно отправлен!\n\nCallback URL: ${res.data.callback_url}`);
+      } catch (err: any) {
+          alert('❌ Ошибка отправки: ' + (err.response?.data?.detail || err.message));
+      } finally {
+          setActionLoading(false);
+      }
+  };
+
+  const handleDelegate = async () => {
+      if (!delegateTargetId) return;
+      setActionLoading(true);
+      try {
+          await api.post('/psd-analyst/delegate', null, {
+              params: { to_user_id: delegateTargetId, days: delegateDays }
+          });
+          setDelegateDialogOpen(false);
+          alert('Полномочия успешно делегированы');
+      } finally {
+          setActionLoading(false);
+      }
+  };
+
+  const handleDownloadResultZip = async (docId: number) => {
+      try {
+          const response = await api.get(`/psd-analyst/documents/${docId}/download-result`, {
+              responseType: 'blob'
+          });
+          const url = window.URL.createObjectURL(new Blob([response.data]));
+          const link = document.createElement('a');
+          link.href = url;
+          link.setAttribute('download', `Analysis_Result_${docId}.zip`);
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.URL.revokeObjectURL(url);
+      } catch (err: any) {
+          console.error('Download error:', err);
+          alert('Ошибка при скачивании файла');
+      }
+  };
+
   const handleDeleteDocument = async (docId: number) => {
     if (!window.confirm('Вы уверены, что хотите удалить этот проект? Это действие необратимо.')) return;
     try {
@@ -218,24 +375,6 @@ const PsdAnalystPage: React.FC = () => {
     } finally { setParsing(false); }
   };
 
-  const handleFinishAnalysis = async () => {
-    if (!selectedDoc) return;
-    if (!window.confirm('Завершить анализ? Это действие сформирует финальный отчет и отправит его дочерней организации по API (если настроено).')) return;
-    
-    setFinishLoading(true);
-    try {
-        await api.post(`/psd-analyst/documents/${selectedDoc.id}/finish`);
-        alert('Анализ успешно завершен!');
-        loadDocuments();
-        setActiveTab(0);
-        setSelectedDoc(null);
-    } catch (err) {
-        alert('Ошибка при завершении анализа');
-    } finally {
-        setFinishLoading(false);
-    }
-  };
-
   const handleUploadTest = async () => {
     if (!selectedFile || !testProjectName) return;
     setUploading(true);
@@ -252,11 +391,9 @@ const PsdAnalystPage: React.FC = () => {
       setTestProjectName('');
       setSelectedFile(null);
       
-      // Переключаемся на тесты и загружаем список
       setShowTests(true);
       await loadDocuments();
       
-      // Открываем созданный документ
       if (res.data) {
         setSelectedDoc(res.data);
         setActiveTab(1);
@@ -308,9 +445,8 @@ const PsdAnalystPage: React.FC = () => {
     const libRes = await api.get(`/psd-analyst/agsk-library/${editingMatch.code_sn}`);
     setLibrary(libRes.data);
     loadArchive();
-    loadMatches(selectedDoc.id);
+    loadMatches(selectedDoc!.id);
 
-    // Remove the added item from recommendations and reestrResults
     setRecommendations(prev => prev.filter(rec => !(rec.enstru_code === item.enstru_code && rec.ktp_id === item.ktp_id)));
     setReestrResults(prev => prev.filter(res => !(res.enstru_code === item.enstru_code && res.ktp_id === item.ktp_id)));
   };
@@ -392,6 +528,21 @@ const PsdAnalystPage: React.FC = () => {
     }
   };
 
+  const getStatusChip = (status: ExternalDocumentStatus) => {
+      switch (status) {
+          case "NEW": return <Chip label="Новый" size="small" variant="outlined" />;
+          case "PARSED": return <Chip label="Распарсен" size="small" color="info" variant="outlined" />;
+          case "ASSIGNED_TO_ANALYST": return <Chip label="Назначен" size="small" color="primary" variant="outlined" />;
+          case "FOR_APPROVAL": return <Chip label="На утверждении" size="small" color="warning" />;
+          case "APPROVED": return <Chip label="Утвержден" size="small" color="success" />;
+          case "COMPLETED": return <Chip label="Завершен" size="small" color="success" variant="filled" icon={<CheckCircleIcon />} />;
+          case "SENT": return <Chip label="Отправлен в ДО" size="small" color="info" variant="filled" icon={<SendIcon />} />;
+          case "REJECTED_BY_DIRECTOR": return <Chip label="На доработке" size="small" color="error" variant="outlined" icon={<RejectIcon />} />;
+          case "ERROR": return <Chip label="Ошибка" size="small" color="error" />;
+          default: return <Chip label={status} size="small" variant="outlined" />;
+      }
+  };
+
   const getDvcColor = (percent: number) => {
     if (percent === 100) return 'success';
     if (percent >= 70)   return 'warning';
@@ -406,7 +557,7 @@ const PsdAnalystPage: React.FC = () => {
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
         {codes.map((code, i) => {
           const name = names[i] || '';
-          const isMatch = highlight && code.toLowerCase().includes(highlight.toLowerCase()); // Use includes for broader highlighting
+          const isMatch = highlight && code.toLowerCase().includes(highlight.toLowerCase());
           return (
             <Tooltip key={code} title={name || code} arrow placement="top">
               <Chip
@@ -481,6 +632,17 @@ const PsdAnalystPage: React.FC = () => {
           </Box>
           
           <Stack direction="row" spacing={1}>
+            {isRealDirector && (
+                <Button
+                    size="small"
+                    variant="outlined"
+                    color="primary"
+                    startIcon={<DelegateIcon />}
+                    onClick={() => setDelegateDialogOpen(true)}
+                    sx={{ bgcolor: 'white', textTransform: 'none' }}>
+                    Делегировать
+                </Button>
+            )}
             <Button 
                 size="small" 
                 variant="outlined" 
@@ -494,16 +656,6 @@ const PsdAnalystPage: React.FC = () => {
               sx={{ bgcolor: 'white', textTransform: 'none' }}>
               Обновить
             </Button>
-            <Button 
-              size="small" 
-              variant="contained" 
-              startIcon={exportLoading ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
-              disabled={exportLoading}
-              onClick={() => handleExportFullReport()} 
-              sx={{ textTransform: 'none' }}
-            >
-              Экспорт всех
-            </Button>
           </Stack>
         </Box>
 
@@ -516,35 +668,159 @@ const PsdAnalystPage: React.FC = () => {
 
         {activeTab === 0 && (
           <TableContainer component={Paper} elevation={0}
-            sx={{ border: '1px solid #e0e0e0', borderRadius: 2 }}>
+            sx={{ border: '1px solid #e0e0e0', borderRadius: 2, position: 'relative' }}>
+            {listLoading && <LinearProgress sx={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1 }} />}
             <Table size="small">
               <TableHead sx={{ bgcolor: '#fafafa' }}>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 'bold' }}>ID</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Наименование / Отправитель</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Тип / № документа ДО</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Проект / Отправитель</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Контакты Отправителя</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Аналитик</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }}>Рабочих дней</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Срок / Дедлайн</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Статус</TableCell>
                   <TableCell align="right" sx={{ fontWeight: 'bold' }}>Действие</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {documents.map(doc => {
-                  const days = calculateWorkingDays(doc.received_at, doc.completed_at || new Date());
-                  
-                  // Логика цвета для рабочих дней:
-                  // 10+ дней -> красный (error)
-                  // 7-9 дней -> оранжевый (warning)
-                  // остальное -> стандартный (default)
-                  let color: 'error' | 'warning' | 'default' = 'default';
-                  if (doc.status !== 'COMPLETED') {
-                      if (days >= 10) color = 'error';
-                      else if (days >= 7) color = 'warning';
-                  }
+                {(() => {
+                  // Группируем документы по проекту (external_id + bank_name)
+                  const groups = new Map<string, {projectKey: string, bankName: string, externalId: string | null, docs: typeof documents}>()
+                  documents.forEach(doc => {
+                    const key = doc.external_id ? `${doc.bank_name}::${doc.external_id}` : `single::${doc.id}`;
+                    if (!groups.has(key)) {
+                      groups.set(key, {
+                        projectKey: key,
+                        bankName: doc.bank_name,
+                        externalId: doc.external_id,
+                        docs: []
+                      });
+                    }
+                    groups.get(key)!.docs.push(doc);
+                  });
 
-                  return (
-                    <TableRow key={doc.id} hover sx={{ bgcolor: doc.is_test ? '#fffef0' : 'inherit' }}>
-                      <TableCell>#{doc.id}</TableCell>
+                  const groupList = Array.from(groups.values()).sort((a, b) => {
+                    // Группы с external_id идут первыми, потом по дате первого документа
+                    if (a.externalId && !b.externalId) return -1;
+                    if (!a.externalId && b.externalId) return 1;
+                    return new Date(b.docs[0].received_at).getTime() - new Date(a.docs[0].received_at).getTime();
+                  });
+
+                  return groupList.flatMap(group => {
+                    const isExpanded = expandedGroups.has(group.projectKey);
+                    const isMultiDoc = group.docs.length > 1;
+
+                    const rows: JSX.Element[] = [];
+
+                    // Заголовок группы (только если несколько документов с external_id)
+                    if (isMultiDoc) {
+                      const allAssigned = group.docs.every(d => d.assigned_to);
+                      const anyParsed = group.docs.some(d => d.status === 'PARSED' || d.status === 'ASSIGNED_TO_ANALYST');
+
+                      rows.push(
+                        <TableRow
+                          key={`group-${group.projectKey}`}
+                          sx={{
+                            bgcolor: allAssigned ? '#e3f2fd' : anyParsed ? '#f5f5f5' : '#fff3e0',
+                            cursor: 'pointer',
+                            '&:hover': { bgcolor: '#e0e0e0' }
+                          }}
+                          onClick={() => {
+                            const newSet = new Set(expandedGroups);
+                            if (newSet.has(group.projectKey)) {
+                              newSet.delete(group.projectKey);
+                            } else {
+                              newSet.add(group.projectKey);
+                            }
+                            setExpandedGroups(newSet);
+                          }}
+                        >
+                          <TableCell colSpan={8}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                              <IconButton size="small">
+                                {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                              </IconButton>
+                              <Typography variant="subtitle2" fontWeight="bold">
+                                Проект: {group.bank_name}
+                              </Typography>
+                              <Chip
+                                size="small"
+                                label={`№ ${group.externalId}`}
+                                color="primary"
+                                variant="outlined"
+                                sx={{ fontFamily: 'monospace' }}
+                              />
+                              <Chip
+                                size="small"
+                                label={`${group.docs.length} файла`}
+                                color="default"
+                                variant="outlined"
+                              />
+                              {allAssigned && (
+                                <Chip size="small" label="Назначен" color="success" variant="outlined" />
+                              )}
+                              <Box sx={{ ml: 'auto', display: 'flex', gap: 0.5 }}>
+                                {group.docs.map(d => (
+                                  <Chip
+                                    key={d.id}
+                                    size="small"
+                                    label={d.doc_type}
+                                    color={d.doc_type === 'PSD' ? 'primary' : 'secondary'}
+                                    sx={{ fontSize: '0.7rem', height: 20 }}
+                                  />
+                                ))}
+                              </Box>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+
+                    // Строки документов (показываем всегда для одиночных, или если группа раскрыта)
+                    if (!isMultiDoc || isExpanded || !isMultiDoc) {
+                      group.docs.forEach(doc => {
+                        const days = calculateWorkingDays(doc.received_at, doc.completed_at || new Date().toISOString());
+
+                        let color: 'error' | 'warning' | 'default' = 'default';
+                        if (doc.status !== 'COMPLETED' && doc.deadline_days) {
+                            if (days >= doc.deadline_days) color = 'error';
+                            else if (days >= doc.deadline_days * 0.7) color = 'warning';
+                        }
+
+                        rows.push(
+                          <TableRow
+                            key={doc.id}
+                            hover
+                            sx={{
+                              bgcolor: doc.is_test ? '#fffef0' : 'inherit',
+                              ...(isMultiDoc && { pl: 4 })
+                            }}
+                          >
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          {isMultiDoc && <Box sx={{ width: 24 }} />} {/* Отступ для группы */}
+                          #{doc.id}
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                              <Chip
+                                  size="small"
+                                  label={doc.doc_type}
+                                  color={doc.doc_type === 'PSD' ? 'primary' : 'secondary'}
+                                  sx={{ fontWeight: 'bold', width: 'fit-content' }}
+                              />
+                              {doc.external_id && (
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                                      №: {doc.external_id}
+                                  </Typography>
+                              )}
+                              <Typography variant="caption" color="text.disabled">
+                                  {new Date(doc.received_at).toLocaleString('ru-RU')}
+                              </Typography>
+                          </Box>
+                      </TableCell>
                       <TableCell>
                           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -559,6 +835,34 @@ const PsdAnalystPage: React.FC = () => {
                                               {doc.sender_last_name} {doc.sender_first_name?.charAt(0)}.
                                           </Typography>
                                       </Box>
+                                  </Tooltip>
+                              )}
+                              {doc.notes && (
+                                  <Tooltip title={doc.notes}>
+                                      <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          📝 {doc.notes}
+                                      </Typography>
+                                  </Tooltip>
+                              )}
+                          </Box>
+                      </TableCell>
+                      <TableCell>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                              {doc.sender_email && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      <EmailIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+                                      <Typography variant="caption" color="text.secondary">{doc.sender_email}</Typography>
+                                  </Box>
+                              )}
+                              {doc.sender_phone && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      <PhoneIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+                                      <Typography variant="caption" color="text.secondary">{doc.sender_phone}</Typography>
+                                  </Box>
+                              )}
+                              {doc.callback_url && (
+                                  <Tooltip title={`Callback URL: ${doc.callback_url}`}>
+                                      <Chip size="small" label="API ✓" color="success" sx={{ fontSize: '0.6rem', height: 16, width: 'fit-content' }} />
                                   </Tooltip>
                               )}
                           </Box>
@@ -578,53 +882,106 @@ const PsdAnalystPage: React.FC = () => {
                           )}
                       </TableCell>
                       <TableCell>
-                        <Chip 
-                            icon={<AccessTimeIcon />}
-                            label={`${days} раб. дн.`} 
-                            color={color} 
-                            variant={color !== 'default' ? 'filled' : 'outlined'}
-                            size="small" 
-                            sx={{ fontWeight: 'bold' }}
-                        />
+                        <Stack spacing={0.5}>
+                            <Chip 
+                                icon={<AccessTimeIcon />}
+                                label={`${days} раб. дн.`} 
+                                color={color} 
+                                variant={color !== 'default' ? 'filled' : 'outlined'}
+                                size="small" 
+                                sx={{ fontWeight: 'bold' }}
+                            />
+                            {doc.deadline_at && (
+                                <Typography variant="caption" sx={{ color: color === 'error' ? 'error.main' : 'text.secondary', fontSize: '0.65rem' }}>
+                                    До: {new Date(doc.deadline_at).toLocaleDateString()}
+                                </Typography>
+                            )}
+                        </Stack>
                       </TableCell>
                       <TableCell>
-                        <Chip 
-                            label={doc.status} 
-                            size="small" 
-                            variant="outlined" 
-                            color={doc.status === 'ERROR' ? 'error' : (doc.status === 'COMPLETED' ? 'success' : 'default')} 
-                        />
+                        <Stack spacing={0.5} alignItems="flex-start">
+                            {getStatusChip(doc.status)}
+                            {doc.director_comment && (
+                                <Tooltip title={doc.director_comment}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'help' }}>
+                                        <CommentIcon sx={{ fontSize: 12, color: 'error.main' }} />
+                                        <Typography variant="caption" color="error" sx={{ fontSize: '0.6rem' }}>Комментарий</Typography>
+                                    </Box>
+                                </Tooltip>
+                            )}
+                        </Stack>
                       </TableCell>
                       <TableCell align="right">
                         <Stack direction="row" spacing={1} justifyContent="flex-end">
-                          {!doc.assigned_to ? (
-                              <Button size="small" variant="contained" startIcon={<AssignIcon />}
-                              onClick={() => api.post(`/psd-analyst/documents/${doc.id}/assign`).then(loadDocuments)}>
-                              Взять в работу
-                              </Button>
-                          ) : (
-                              <Button size="small" variant="outlined"
-                              onClick={() => { setSelectedDoc(doc); setActiveTab(1); }}>
-                              Открыть
+                          {isDirector && (doc.status === 'NEW' || doc.status === 'PARSED') && (
+                              <Button size="small" variant="contained" color="primary" startIcon={<AssignIcon />}
+                              onClick={() => { setTargetDoc(doc); setAssignDialogOpen(true); }}>
+                              Назначить
                               </Button>
                           )}
+                          
+                          {isDirector && doc.status === 'FOR_APPROVAL' && (
+                              <>
+                                <Button size="small" variant="contained" color="success" onClick={() => handleApprove(doc.id)}>
+                                    Утвердить
+                                </Button>
+                                <Button size="small" variant="outlined" color="error" onClick={() => { setTargetDoc(doc); setRejectDialogOpen(true); }}>
+                                    Вернуть
+                                </Button>
+                              </>
+                          )}
+
+                          {doc.status === 'COMPLETED' && (
+                              <Button size="small" variant="outlined" color="success" startIcon={<DownloadIcon />} onClick={() => handleDownloadResultZip(doc.id)}>
+                                  Результат
+                              </Button>
+                          )}
+
+                          {isRealDirector && (doc.status === 'APPROVED' || doc.status === 'COMPLETED') && (
+                              <Tooltip title={doc.callback_url ? 'Отправить ZIP архив в дочернюю организацию' : 'Callback URL не указан при загрузке документа'}>
+                                  <span>
+                                      <Button
+                                          size="small"
+                                          variant="contained"
+                                          color="info"
+                                          startIcon={<SendIcon />}
+                                          onClick={() => handleSendToDo(doc.id)}
+                                          disabled={actionLoading || !doc.callback_url}
+                                      >
+                                          Отправить в ДО
+                                      </Button>
+                                  </span>
+                              </Tooltip>
+                          )}
+
+                          {doc.status === 'SENT' && (
+                              <Chip label="Отправлен в ДО" size="small" color="info" variant="outlined" />
+                          )}
+
+                          {!isDirector && doc.assigned_to === currentUser?.id && (doc.status === 'ASSIGNED_TO_ANALYST' || doc.status === 'REJECTED_BY_DIRECTOR') && (
+                              <Button size="small" variant="contained" onClick={() => { setSelectedDoc(doc); setActiveTab(1); }}>
+                                  Начать работу
+                              </Button>
+                          )}
+
+                          <Button size="small" variant="outlined"
+                              onClick={() => { setSelectedDoc(doc); setActiveTab(1); }}>
+                              Открыть
+                          </Button>
+                          
                           <IconButton size="small" color="error" onClick={() => handleDeleteDocument(doc.id)}>
                               <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Stack>
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-                {documents.length === 0 && (
-                    <TableRow>
-                        <TableCell colSpan={7} align="center" sx={{ py: 5 }}>
-                            <Typography color="text.secondary">
-                                {assignedToMe ? 'У вас нет проектов в работу' : (showTests ? 'Тестовые проекты не найдены' : 'Документы не найдены')}
-                            </Typography>
-                        </TableCell>
-                    </TableRow>
-                )}
+                        );
+                      });
+                    }
+
+                    return rows;
+                  });
+                })()}
               </TableBody>
             </Table>
           </TableContainer>
@@ -635,43 +992,25 @@ const PsdAnalystPage: React.FC = () => {
             <Paper sx={{ 
                 p: 1.5, mb: 2, display: 'flex', gap: 2, alignItems: 'center', 
                 borderRadius: 2, flexWrap: 'wrap',
-                borderLeft: selectedDoc.is_test ? '6px solid #ffa000' : 'none'
+                borderLeft: selectedDoc.is_test ? '6px solid #ffa000' : (selectedDoc.status === 'REJECTED_BY_DIRECTOR' ? '6px solid #f44336' : 'none')
             }}>
-              <Box>
+              <Box sx={{ flexGrow: 1 }}>
                 <Typography variant="subtitle2" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     {selectedDoc.is_test && <ScienceIcon sx={{ fontSize: 18, color: 'warning.main' }} />}
                     #{selectedDoc.id} {selectedDoc.bank_name}
                 </Typography>
-                {selectedDoc.is_test ? (
-                    <Typography variant="caption" color="warning.dark" sx={{ fontWeight: 'bold' }}>
-                        ТЕСТОВЫЙ РЕЖИМ (ДЛЯ СЕБЯ)
-                    </Typography>
-                ) : (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                         {selectedDoc.sender_last_name && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <PersonIcon sx={{ fontSize: 12 }} /> 
-                                {selectedDoc.sender_last_name} {selectedDoc.sender_first_name}
+                <Stack direction="row" spacing={2} alignItems="center">
+                    {getStatusChip(selectedDoc.status)}
+                    {selectedDoc.director_comment && (
+                        <Box sx={{ bgcolor: '#fff5f5', p: 0.5, borderRadius: 1, border: '1px solid #ffcdd2', display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <CommentIcon sx={{ fontSize: 14, color: 'error.main' }} />
+                            <Typography variant="caption" color="error.main">
+                                <b>Замечание:</b> {selectedDoc.director_comment}
                             </Typography>
-                         )}
-                         {selectedDoc.sender_phone && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <PhoneIcon sx={{ fontSize: 12 }} /> {selectedDoc.sender_phone}
-                            </Typography>
-                         )}
-                    </Box>
-                )}
+                        </Box>
+                    )}
+                </Stack>
               </Box>
-              
-              <Divider orientation="vertical" flexItem />
-              
-              <Chip 
-                label={`Позиций: ${totalCount}`} 
-                size="small" 
-                color="primary" 
-                variant="outlined" 
-                sx={{ fontWeight: 'bold' }} 
-              />
               
               <Divider orientation="vertical" flexItem />
 
@@ -717,22 +1056,32 @@ const PsdAnalystPage: React.FC = () => {
                       Отчет (Excel)
                     </Button>
                     
-                    {!selectedDoc.is_test && selectedDoc.status !== 'COMPLETED' && (
+                    {!selectedDoc.is_test && (selectedDoc.status === 'ASSIGNED_TO_ANALYST' || selectedDoc.status === 'REJECTED_BY_DIRECTOR') && (
                         <Button
                             size="small"
                             variant="contained"
                             color="primary"
-                            startIcon={finishLoading ? <CircularProgress size={16} color="inherit" /> : <CheckCircleIcon />}
-                            disabled={finishLoading}
-                            onClick={handleFinishAnalysis}
+                            startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <SendIcon />}
+                            disabled={actionLoading}
+                            onClick={() => handleSubmitForApproval(selectedDoc.id)}
                             sx={{ textTransform: 'none' }}
                         >
-                            Завершить и отправить
+                            На утверждение
                         </Button>
                     )}
                     
-                    {selectedDoc.status === 'COMPLETED' && (
-                        <Chip icon={<CheckCircleIcon />} label="Анализ завершен" color="success" />
+                    {isDirector && selectedDoc.status === 'FOR_APPROVAL' && (
+                         <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <ApprovedIcon />}
+                            disabled={actionLoading}
+                            onClick={() => handleApprove(selectedDoc.id)}
+                            sx={{ textTransform: 'none' }}
+                        >
+                            Утвердить результат
+                        </Button>
                     )}
                   </Stack>
                 </>
@@ -807,13 +1156,6 @@ const PsdAnalystPage: React.FC = () => {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!listLoading && matches.length === 0 && totalCount > 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                        <Typography variant="body2" color="text.secondary">По вашему запросу ничего не найдено</Typography>
-                      </TableCell>
-                    </TableRow>
-                  )}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -861,6 +1203,134 @@ const PsdAnalystPage: React.FC = () => {
             </Table>
           </TableContainer>
         )}
+
+        {/* --- ДИАЛОГИ ДИРЕКТОРА --- */}
+
+        {/* Назначение аналитика */}
+        <Dialog open={assignDialogOpen} onClose={() => !actionLoading && setAssignDialogOpen(false)} maxWidth="xs" fullWidth>
+            <DialogTitle sx={{ fontWeight: 'bold' }}>Назначить аналитика</DialogTitle>
+            <DialogContent>
+                <Stack spacing={3} sx={{ mt: 1 }}>
+                    <FormControl fullWidth size="small">
+                        <InputLabel>Выберите аналитика</InputLabel>
+                        <Select
+                            value={selectedAnalystId}
+                            label="Выберите аналитика"
+                            onChange={(e) => setSelectedAnalystId(e.target.value as number)}
+                        >
+                            {analysts.map(a => (
+                                <MenuItem key={a.id} value={a.id}>{a.full_name}</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    <TextField
+                        fullWidth
+                        label="Срок выполнения (раб. дней)"
+                        type="number"
+                        size="small"
+                        value={deadlineDays}
+                        onChange={(e) => {
+                            const value = Number(e.target.value);
+                            if (value > 10) {
+                                setDeadlineDays(10);
+                            } else if (value < 1) {
+                                setDeadlineDays(1);
+                            } else {
+                                setDeadlineDays(value);
+                            }
+                        }}
+                        inputProps={{ min: 1, max: 10 }}
+                        helperText={deadlineDays >= 10 ? "Максимум 10 рабочих дней" : ""}
+                        error={deadlineDays > 10}
+                    />
+                </Stack>
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+                <Button onClick={() => setAssignDialogOpen(false)}>Отмена</Button>
+                <Button 
+                    variant="contained" 
+                    onClick={handleAssignAnalyst} 
+                    disabled={actionLoading || !selectedAnalystId}
+                    startIcon={actionLoading && <CircularProgress size={16} color="inherit" />}
+                >
+                    Назначить
+                </Button>
+            </DialogActions>
+        </Dialog>
+
+        {/* Возврат на доработку */}
+        <Dialog open={rejectDialogOpen} onClose={() => !actionLoading && setRejectDialogOpen(false)} maxWidth="sm" fullWidth>
+            <DialogTitle sx={{ fontWeight: 'bold', color: 'error.main' }}>Вернуть на доработку</DialogTitle>
+            <DialogContent>
+                <Typography variant="body2" sx={{ mb: 2 }}>
+                    Укажите причину возврата или необходимые исправления. Аналитик увидит этот комментарий.
+                </Typography>
+                <TextField
+                    fullWidth
+                    multiline
+                    rows={4}
+                    label="Комментарий аналитику"
+                    value={rejectComment}
+                    onChange={(e) => setRejectComment(e.target.value)}
+                    placeholder="Напр. Необходимо уточнить сопоставление по позициям..."
+                />
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+                <Button onClick={() => setRejectDialogOpen(false)}>Отмена</Button>
+                <Button 
+                    variant="contained" 
+                    color="error"
+                    onClick={handleReject} 
+                    disabled={actionLoading || !rejectComment}
+                    startIcon={actionLoading && <CircularProgress size={16} color="inherit" />}
+                >
+                    Вернуть аналитику
+                </Button>
+            </DialogActions>
+        </Dialog>
+
+        {/* Делегирование полномочий */}
+        <Dialog open={delegateDialogOpen} onClose={() => !actionLoading && setDelegateDialogOpen(false)} maxWidth="xs" fullWidth>
+            <DialogTitle sx={{ fontWeight: 'bold' }}>Делегировать полномочия</DialogTitle>
+            <DialogContent>
+                <Typography variant="caption" sx={{ mb: 2, display: 'block' }}>
+                    Временно передайте права директора выбранному аналитику на период отпуска.
+                </Typography>
+                <Stack spacing={3} sx={{ mt: 1 }}>
+                    <FormControl fullWidth size="small">
+                        <InputLabel>Кому передать права</InputLabel>
+                        <Select
+                            value={delegateTargetId}
+                            label="Кому передать права"
+                            onChange={(e) => setDelegateTargetId(e.target.value as number)}
+                        >
+                            {analysts.map(a => (
+                                <MenuItem key={a.id} value={a.id}>{a.full_name}</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    <TextField
+                        fullWidth
+                        label="Срок делегирования (календ. дней)"
+                        type="number"
+                        size="small"
+                        value={delegateDays}
+                        onChange={(e) => setDelegateDays(Number(e.target.value))}
+                    />
+                </Stack>
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+                <Button onClick={() => setDelegateDialogOpen(false)}>Отмена</Button>
+                <Button 
+                    variant="contained" 
+                    onClick={handleDelegate}
+                    disabled={actionLoading || !delegateTargetId}
+                    startIcon={actionLoading && <CircularProgress size={16} color="inherit" />}
+                >
+                    Подтвердить
+                </Button>
+            </DialogActions>
+        </Dialog>
 
         {/* ДИАЛОГ ЗАГРУЗКИ ТЕСТА */}
         <Dialog open={uploadDialogOpen} onClose={() => !uploading && setUploadDialogOpen(false)} maxWidth="xs" fullWidth>

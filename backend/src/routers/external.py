@@ -37,10 +37,10 @@ async def upload_external_document(
 ):
     """
     Загрузка документа от дочерней организации.
-    
+
     Требуется заголовок X-API-Key с действительным API-ключом.
-    
-    - **file**: Файл документа (.kenml или .zip)
+
+    - **file**: Файл документа (.kenml, .zip для PSD или .xlsx для SMETA)
     - **doc_type**: Тип документа (PSD или SMETA)
     - **bank_name**: Наименование банка/проекта
     - **received_at**: Дата и время отправки (ISO 8601)
@@ -49,12 +49,28 @@ async def upload_external_document(
     - **external_id**: ID документа в вашей системе
     - **callback_url**: URL для отправки результата анализа
     """
-    # Проверка расширения файла
+    # Проверка расширения файла в зависимости от типа документа
     file_ext = os.path.splitext(file.filename)[1].lower()
-    if file_ext not in ['.kenml', '.zip']:
+    doc_type_upper = doc_type.upper()
+
+    if doc_type_upper == "PSD":
+        allowed_exts = ['.kenml', '.zip']
+        if file_ext not in allowed_exts:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Неподдерживаемый формат файла для PSD: {file_ext}. Поддерживаются только .kenml и .zip"
+            )
+    elif doc_type_upper == "SMETA":
+        allowed_exts = ['.xlsx', '.xls']
+        if file_ext not in allowed_exts:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Неподдерживаемый формат файла для SMETA: {file_ext}. Поддерживаются только .xlsx и .xls"
+            )
+    else:
         raise HTTPException(
-            status_code=400, 
-            detail=f"Неподдерживаемый формат файла: {file_ext}. Поддерживаются только .kenml и .zip"
+            status_code=400,
+            detail=f"Неизвестный тип документа: {doc_type}. Поддерживаются PSD и SMETA"
         )
     
     # Добавляем информацию об организации в примечания
@@ -72,17 +88,10 @@ async def upload_external_document(
         sender_last_name=sender_last_name,
         sender_patronymic=sender_patronymic,
         sender_email=sender_email,
-        sender_phone=sender_phone
+        sender_phone=sender_phone,
+        external_id=external_id,
+        callback_url=callback_url
     )
-    
-    # Добавляем external_id и callback_url если переданы
-    if external_id:
-        result.external_id = external_id
-    if callback_url:
-        result.callback_url = callback_url
-    
-    db.commit()
-    db.refresh(result)
     
     return result
 

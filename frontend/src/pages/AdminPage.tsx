@@ -260,6 +260,7 @@ const ExternalDocsTab = () => {
     const [senderPatronymic, setSenderPatronymic] = useState('');
     const [senderEmail, setSenderEmail] = useState('');
     const [senderPhone, setSenderPhone] = useState('');
+    const [externalId, setExternalId] = useState('');
 
     const loadDocs = () => {
         setLoading(true);
@@ -279,7 +280,7 @@ const ExternalDocsTab = () => {
         try {
             await uploadExternalDoc(
                 file, docType, bankName, receivedAt, notes,
-                senderFirstName, senderLastName, senderPatronymic, senderEmail, senderPhone
+                senderFirstName, senderLastName, senderPatronymic, senderEmail, senderPhone, externalId
             );
             setUploadOpen(false);
             loadDocs();
@@ -299,6 +300,7 @@ const ExternalDocsTab = () => {
         setSenderPatronymic('');
         setSenderEmail('');
         setSenderPhone('');
+        setExternalId('');
     };
 
     const handleSendResponse = async (docId: number) => {
@@ -420,6 +422,7 @@ const ExternalDocsTab = () => {
                                     <MenuItem value="PSD">ПСД (KENML)</MenuItem>
                                     <MenuItem value="SMETA">Смета (Excel)</MenuItem>
                                 </TextField>
+                                <TextField label="Номер документа (ID во внешней системе)" value={externalId} onChange={(e) => setExternalId(e.target.value)} fullWidth size="small" />
                                 <TextField label="Наименование объекта / Банка" value={bankName} onChange={(e) => setBankName(e.target.value)} fullWidth size="small" />
                                 <TextField label="Дата и время получения" type="datetime-local" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} fullWidth size="small" InputLabelProps={{ shrink: true }} />
                                 <TextField label="Примечание" value={notes} onChange={(e) => setNotes(e.target.value)} fullWidth multiline rows={2} size="small" />

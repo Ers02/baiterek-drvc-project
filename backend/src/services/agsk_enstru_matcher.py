@@ -70,30 +70,5 @@ class AgskEnstruMatcher:
                         "reason": f"Реестр КТП (Завод: {ktp_exact.company_name}, ДВС: {dvc}%)"
                     }
 
-        # 3. Реестр КТП (Родительский код - группа)
-        if len(q) >= 10: # Предполагаем 10 символов для родительской группы
-            parent = q[:10]
-            ktp_parent = self.db.query(Reestr_KTP).filter(
-                text("EXISTS (SELECT 1 FROM jsonb_array_elements_text(agsk3_codes) AS elem WHERE elem LIKE :prefix)")
-            ).params(prefix=f"{parent}%").first()
-            
-            if ktp_parent and ktp_parent.enstru_codes:
-                for code in ktp_parent.enstru_codes:
-                    if self._check_enstru_exists(code):
-                        name = "КТП Родитель"
-                        try:
-                            idx = ktp_parent.enstru_codes.index(code)
-                            if ktp_parent.enstru_names and len(ktp_parent.enstru_names) > idx:
-                                name = ktp_parent.enstru_names[idx]
-                        except: pass
-
-                        dvc = ktp_parent.dvc_percent or "0"
-                        return {
-                            "enstru_code": code,
-                            "enstru_name": name,
-                            "match_type": "auto_ktp", # Изменено на auto_ktp
-                            "score": 80,
-                            "reason": f"КТП по группе {parent} (Завод: {ktp_parent.company_name}, ДВС: {dvc}%)"
-                        }
-
+        # Только точное совпадение АГСК кода - сопоставление по родительской группе удалено
         return None

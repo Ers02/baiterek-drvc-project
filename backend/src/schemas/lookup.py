@@ -156,3 +156,55 @@ class CostItemCreate(BaseModel):
 class SourceFundingCreate(BaseModel):
     name_ru: str
     name_kz: str
+
+
+# Схема для Oked
+class Oked(BaseModel):
+    id: int
+    code: Optional[str] = None
+    name_kz: Optional[str] = None
+    name_ru: Optional[str] = None
+    parent_identificator: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Схема для Kpved
+class Kpved(BaseModel):
+    id: int
+    code: Optional[str] = None
+    name_kz: Optional[str] = None
+    name_ru: Optional[str] = None
+    parent_identificator: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Схема для Tnved
+class Tnved(BaseModel):
+    id: int
+    code: Optional[str] = None
+    tree_name: Optional[str] = None
+    name: Optional[str] = None
+    parent_id: Optional[int] = None
+    is_last: Optional[bool] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Схема для поиска КТП с фильтрами (оптимизированная - только нужные поля)
+class KtpSearchResult(BaseModel):
+    id: int
+    product_code: Optional[str] = None  # Код продукта для связи
+    product_name: Optional[str] = None
+    company_name: Optional[str] = None
+    bin_iin: Optional[str] = None
+    dvc_percent: Optional[str] = None  # Процент ВЦ
+
+    class Config:
+        from_attributes = True

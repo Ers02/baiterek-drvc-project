@@ -1,11 +1,12 @@
 import enum
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database.base import Base
 
 class UserRole(str, enum.Enum):
     ADMIN = "admin"               # Супер-администратор, может всё включая справочники
+    DIRECTOR_DRVC = "director_drvc" # Директор ДРВЦ
     ANALYST_DRVC = "analyst_drvc" # Аналитик ДРВЦ
     USER = "user"                 # Обычный пользователь
 
@@ -25,4 +26,10 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
+    # Поля для делегирования полномочий
+    delegated_to_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    delegation_start = Column(DateTime(timezone=True), nullable=True)
+    delegation_end = Column(DateTime(timezone=True), nullable=True)
+
     plans = relationship("ProcurementPlan", back_populates="creator")
+    delegated_user = relationship("User", remote_side=[id], foreign_keys=[delegated_to_id])

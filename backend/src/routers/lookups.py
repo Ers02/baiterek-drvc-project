@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, text
+from sqlalchemy import or_, text, cast, String
 from typing import List, Optional
 
 from ..database.database import get_db
@@ -443,3 +443,162 @@ def delete_source_funding(
     db.delete(db_source_funding)
     db.commit()
     return {"ok": True}
+
+
+# ============= OKED KPVED TNVED ENDPOINTS =============
+
+@router.get("/oked", response_model=List[lookup_schema.Oked])
+def get_oked_list(q: Optional[str] = None, db: Session = Depends(get_db)):
+    """Получить список ОКЭД с возможностью поиска"""
+    query = db.query(models.Oked)
+    if q:
+        search_term = f"%{q}%"
+        query = query.filter(or_(
+            models.Oked.code.ilike(search_term),
+            models.Oked.name_ru.ilike(search_term),
+            models.Oked.name_kz.ilike(search_term)
+        ))
+    result = query.limit(100).all()
+    return result
+
+
+@router.get("/kpved", response_model=List[lookup_schema.Kpved])
+def get_kpved_list(q: Optional[str] = None, db: Session = Depends(get_db)):
+    """Получить список КПВЭД с возможностью поиска"""
+    query = db.query(models.Kpved)
+    if q:
+        search_term = f"%{q}%"
+        query = query.filter(or_(
+            models.Kpved.code.ilike(search_term),
+            models.Kpved.name_ru.ilike(search_term),
+            models.Kpved.name_kz.ilike(search_term)
+        ))
+    result = query.limit(100).all()
+    return result
+
+
+@router.get("/tnved", response_model=List[lookup_schema.Tnved])
+def get_tnved_list(q: Optional[str] = None, db: Session = Depends(get_db)):
+    """Получить список ТНВЭД с возможностью поиска"""
+    query = db.query(models.Tnved)
+    if q:
+        search_term = f"%{q}%"
+        query = query.filter(or_(
+            models.Tnved.code.ilike(search_term),
+            models.Tnved.name.ilike(search_term),
+            models.Tnved.tree_name.ilike(search_term)
+        ))
+    result = query.limit(100).all()
+    return result
+
+
+# ============= ADVANCED KTP SEARCH WITH FILTERS =============
+
+@router.get("/search-ktp-advanced")
+def search_ktp_advanced(
+    q: Optional[str] = None,
+    oked_codes: Optional[str] = None,
+    kpved_codes: Optional[str] = None,
+    tnved_codes: Optional[str] = None,
+    enstru_codes: Optional[str] = None,
+    agsk3_codes: Optional[str] = None,
+    search_mode: str = Query("all"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(25, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """
+    Расширенный поиск по реестру КТП с фильтрами.
+    Фильтры передаются как JSON-строки со списками кодов.
+    """
+    import json
+
+    # Базовый запрос - только активные с ДВС > 0
+    query = db.query(models.Reestr_KTP).filter(
+        models.Reestr_KTP.is_active == True,
+        models.Reestr_KTP.dvc_percent != None,
+        models.Reestr_KTP.dvc_percent != '0',
+        models.Reestr_KTP.dvc_percent != '',
+        models.Reestr_KTP.dvc_percent != '0.0',
+        models.Reestr_KTP.dvc_percent != '0,0'
+    )
+
+    # Текстовый поиск
+    if q:
+        search_term = f"%{q}%"
+        if search_mode == "name":
+            query = query.filter(models.Reestr_KTP.product_name.ilike(search_term))
+        elif search_mode == "company":
+            query = query.filter(models.Reestr_KTP.company_name.ilike(search_term))
+        elif search_mode == "bin":
+            query = query.filter(models.Reestr_KTP.bin_iin.ilike(search_term))
+        else:  # all
+            query = query.filter(or_(
+                models.Reestr_KTP.product_name.ilike(search_term),
+                models.Reestr_KTP.company_name.ilike(search_term),
+                models.Reestr_KTP.bin_iin.ilike(search_term),
+                cast(models.Reestr_KTP.enstru_codes, String).ilike(search_term),
+                cast(models.Reestr_KTP.enstru_names, String).ilike(search_term),
+                cast(models.Reestr_KTP.agsk3_codes, String).ilike(search_term),
+                cast(models.Reestr_KTP.agsk3_names, String).ilike(search_term)
+            ))
+
+    # Фильтр по ОКЭД
+    if oked_codes:
+        try:
+            codes = json.loads(oked_codes)
+            if codes:
+                query = query.filter(
+                    or_(*[models.Reestr_KTP.oked_codes.contains([code]) for code in codes])
+                )
+        except json.JSONDecodeError:
+            pass
+
+    # Фильтр по КПВЭД
+    if kpved_codes:
+        try:
+            codes = json.loads(kpved_codes)
+            if codes:
+                query = query.filter(
+                    or_(*[models.Reestr_KTP.kpved_codes.contains([code]) for code in codes])
+                )
+        except json.JSONDecodeError:
+            pass
+
+    # Фильтр по ТНВЭД
+    if tnved_codes:
+        try:
+            codes = json.loads(tnved_codes)
+            if codes:
+                query = query.filter(
+                    or_(*[models.Reestr_KTP.tnved_codes.contains([code]) for code in codes])
+                )
+        except json.JSONDecodeError:
+            pass
+
+    # Фильтр по ЕНС ТРУ
+    if enstru_codes:
+        try:
+            codes = json.loads(enstru_codes)
+            if codes:
+                query = query.filter(
+                    or_(*[models.Reestr_KTP.enstru_codes.contains([code]) for code in codes])
+                )
+        except json.JSONDecodeError:
+            pass
+
+    # Фильтр по АГСК3
+    if agsk3_codes:
+        try:
+            codes = json.loads(agsk3_codes)
+            if codes:
+                query = query.filter(
+                    or_(*[models.Reestr_KTP.agsk3_codes.contains([code]) for code in codes])
+                )
+        except json.JSONDecodeError:
+            pass
+
+    total = query.count()
+    items = query.order_by(models.Reestr_KTP.product_name).offset(skip).limit(limit).all()
+
+    return {"total": total, "items": items}
