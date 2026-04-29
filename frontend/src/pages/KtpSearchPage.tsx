@@ -474,7 +474,7 @@ const KtpSearchPage: React.FC = () => {
     const hiddenCount = codes.length - MAX_VISIBLE;
 
     return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'nowrap', overflow: 'hidden' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap', minWidth: 0 }}>
         {/* Видимые чипы */}
         {visible.map((code) => (
           <Chip
@@ -517,7 +517,6 @@ const KtpSearchPage: React.FC = () => {
               borderColor: `${color}.main`,
               borderRadius: '6px',
               color: `${color}.main`,
-              ml: 'auto',
             }}
           >
             <AddIcon sx={{ fontSize: 14 }} />

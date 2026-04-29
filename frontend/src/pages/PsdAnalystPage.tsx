@@ -86,6 +86,7 @@ interface AgskMatch {
   match_type: 'auto' | 'manual' | 'manual_ktp' | 'auto_ktp' | 'none';
   match_score?: number;
   match_reason?: string;
+  not_in_ktp_registry?: boolean;
 }
 
 interface LibraryItem {
@@ -173,6 +174,10 @@ const PsdAnalystPage: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  // Состояния для комментария аналитика
+  const [analystComment, setAnalystComment] = useState('');
+  const [savingComment, setSavingComment] = useState(false);
+
   const requestCounter = useRef(0);
 
   useEffect(() => {
@@ -183,7 +188,11 @@ const PsdAnalystPage: React.FC = () => {
   }, [showTests, assignedToMe]);
 
   useEffect(() => {
-    if (selectedDoc) loadMatches(selectedDoc.id);
+    if (selectedDoc) {
+      loadMatches(selectedDoc.id);
+      // Загружаем комментарий аналитика из выбранного документа
+      setAnalystComment(selectedDoc.analyst_comment || '');
+    }
   }, [selectedDoc, onlyUnmatched, page, debouncedAgskSearch]);
 
   useEffect(() => { setReestrSearch(''); setReestrResults([]); }, [searchMode]);
@@ -274,10 +283,21 @@ const PsdAnalystPage: React.FC = () => {
       setActionLoading(true);
       try {
           await api.post(`/psd-analyst/documents/${docId}/submit-approval`);
-          loadDocuments();
+          await loadDocuments(); // Ждем завершения загрузки
           if (selectedDoc?.id === docId) setSelectedDoc(null);
           setActiveTab(0);
           alert('Документ отправлен на утверждение');
+      } catch (error: any) {
+          if (error.response?.status === 400) {
+              const detail = error.response.data?.detail;
+              if (detail && detail.includes('необработанные позиции')) {
+                  alert('❌ ' + detail);
+              } else {
+                  alert('Ошибка: ' + (detail || 'Не удалось отправить на утверждение'));
+              }
+          } else {
+              alert('Ошибка при отправке на утверждение');
+          }
       } finally {
           setActionLoading(false);
       }
@@ -288,7 +308,7 @@ const PsdAnalystPage: React.FC = () => {
       setActionLoading(true);
       try {
           await api.post(`/psd-analyst/documents/${docId}/approve`);
-          loadDocuments();
+          await loadDocuments(); // Ждем завершения загрузки
           alert('Документ успешно утвержден');
       } finally {
           setActionLoading(false);
@@ -301,7 +321,7 @@ const PsdAnalystPage: React.FC = () => {
       try {
           await api.post(`/psd-analyst/documents/${targetDoc.id}/reject`, { comment: rejectComment });
           setRejectDialogOpen(false);
-          loadDocuments();
+          await loadDocuments(); // Ждем завершения загрузки
           alert('Документ возвращен на доработку');
       } finally {
           setActionLoading(false);
@@ -313,7 +333,7 @@ const PsdAnalystPage: React.FC = () => {
       setActionLoading(true);
       try {
           const res = await api.post(`/psd-analyst/documents/${docId}/send-to-do`);
-          loadDocuments();
+          await loadDocuments(); // Ждем завершения загрузки
           alert(`✅ Результат успешно отправлен!\n\nCallback URL: ${res.data.callback_url}`);
       } catch (err: any) {
           alert('❌ Ошибка отправки: ' + (err.response?.data?.detail || err.message));
@@ -406,7 +426,16 @@ const PsdAnalystPage: React.FC = () => {
   };
 
   const openEditDialog = async (match: AgskMatch) => {
-    setEditingMatch(match);
+    // Загружаем актуальные данные позиции с сервера
+    const itemId = match.item_id || match.id;
+    try {
+      const itemRes = await api.get(`/psd-analyst/document-items/${match.document_id}/item/${itemId}`);
+      // Обновляем match актуальными данными с сервера
+      setEditingMatch({ ...match, ...itemRes.data });
+    } catch (error) {
+      // Если не удалось загрузить, используем данные из таблицы
+      setEditingMatch(match);
+    }
     setEditDialogOpen(true);
     setSearchMode('all');
     setReestrSearch('');
@@ -449,6 +478,39 @@ const PsdAnalystPage: React.FC = () => {
 
     setRecommendations(prev => prev.filter(rec => !(rec.enstru_code === item.enstru_code && rec.ktp_id === item.ktp_id)));
     setReestrResults(prev => prev.filter(res => !(res.enstru_code === item.enstru_code && res.ktp_id === item.ktp_id)));
+  };
+
+  // Функция для сохранения отметки "Нет в реестре КТП"
+  const saveNotInKtpRegistry = async (itemId: number, value: boolean) => {
+    // Оптимистично обновляем UI сразу
+    const currentId = editingMatch?.item_id || editingMatch?.id;
+    if (editingMatch && currentId === itemId) {
+      setEditingMatch({ ...editingMatch, not_in_ktp_registry: value });
+    }
+
+    try {
+      await api.post(`/psd-analyst/document-items/${itemId}/not-in-ktp-registry`, {
+        value: value
+      });
+      // Перезагружаем список позиций в фоне (без ожидания)
+      if (selectedDoc) {
+        loadMatches(selectedDoc.id);
+      }
+      // Если включили галочку - перезагружаем библиотеку и архив
+      // (записи в библиотеке стали неактивными на бэкенде)
+      if (value && editingMatch?.code_sn) {
+        const libRes = await api.get(`/psd-analyst/agsk-library/${editingMatch.code_sn}`);
+        setLibrary(libRes.data);
+        loadArchive();
+      }
+    } catch (error) {
+      // При ошибке возвращаем старое значение
+      console.error('Failed to save not_in_ktp_registry:', error);
+      if (editingMatch && currentId === itemId) {
+        setEditingMatch({ ...editingMatch, not_in_ktp_registry: !value });
+      }
+      alert('Ошибка при сохранении отметки');
+    }
   };
 
   const removeFromLibrary = async (id: number) => {
@@ -501,7 +563,7 @@ const PsdAnalystPage: React.FC = () => {
       const response = await api.get(`/psd-analyst/documents/${docId}/conclusion`, {
         responseType: 'blob'
       });
-      
+
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -518,13 +580,35 @@ const PsdAnalystPage: React.FC = () => {
     }
   };
 
-  const getMatchTypeStyles = (type: string) => {
+  const handleSaveAnalystComment = async () => {
+    if (!selectedDoc) return;
+    setSavingComment(true);
+    try {
+      await api.post(`/psd-analyst/documents/${selectedDoc.id}/analyst-comment`, {
+        comment: analystComment
+      });
+      // Обновляем локальный документ
+      setSelectedDoc({ ...selectedDoc, analyst_comment: analystComment });
+      alert('Комментарий сохранен');
+    } catch (error) {
+      console.error('Save comment failed:', error);
+      alert('Ошибка при сохранении комментария');
+    } finally {
+      setSavingComment(false);
+    }
+  };
+
+  const getMatchTypeStyles = (type: string, notInKtp?: boolean) => {
+    // Если отмечено "нет в реестре КТП" - показываем это (строго проверяем boolean true)
+    if (notInKtp === true) {
+      return { label: 'Нет в реестре КТП', color: 'warning' };
+    }
     switch (type) {
       case 'manual_ktp': return { label: 'КТП + Библиотека', color: 'primary' };
       case 'manual':     return { label: 'Библиотека',      color: 'success' };
       case 'auto':       return { label: 'Авто',            color: 'info' };
       case 'auto_ktp':   return { label: 'КТП',             color: 'warning' };
-      default:           return { label: 'Нет',             color: 'error' };
+      default:           return { label: '⚠ Не указано',    color: 'error' };
     }
   };
 
@@ -901,11 +985,19 @@ const PsdAnalystPage: React.FC = () => {
                       <TableCell>
                         <Stack spacing={0.5} alignItems="flex-start">
                             {getStatusChip(doc.status)}
+                            {doc.analyst_comment && (
+                                <Tooltip title={doc.analyst_comment}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'help' }}>
+                                        <CommentIcon sx={{ fontSize: 12, color: 'primary.main' }} />
+                                        <Typography variant="caption" color="primary" sx={{ fontSize: '0.6rem' }}>Коммент. аналитика</Typography>
+                                    </Box>
+                                </Tooltip>
+                            )}
                             {doc.director_comment && (
                                 <Tooltip title={doc.director_comment}>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'help' }}>
                                         <CommentIcon sx={{ fontSize: 12, color: 'error.main' }} />
-                                        <Typography variant="caption" color="error" sx={{ fontSize: '0.6rem' }}>Комментарий</Typography>
+                                        <Typography variant="caption" color="error" sx={{ fontSize: '0.6rem' }}>Замечание</Typography>
                                     </Box>
                                 </Tooltip>
                             )}
@@ -999,8 +1091,16 @@ const PsdAnalystPage: React.FC = () => {
                     {selectedDoc.is_test && <ScienceIcon sx={{ fontSize: 18, color: 'warning.main' }} />}
                     #{selectedDoc.id} {selectedDoc.bank_name}
                 </Typography>
-                <Stack direction="row" spacing={2} alignItems="center">
+                <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
                     {getStatusChip(selectedDoc.status)}
+                    {selectedDoc.analyst_comment && (
+                        <Box sx={{ bgcolor: '#e3f2fd', p: 0.5, borderRadius: 1, border: '1px solid #90caf9', display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <CommentIcon sx={{ fontSize: 14, color: 'primary.main' }} />
+                            <Typography variant="caption" color="primary.main">
+                                <b>Комментарий аналитика:</b> {selectedDoc.analyst_comment.length > 50 ? selectedDoc.analyst_comment.substring(0, 50) + '...' : selectedDoc.analyst_comment}
+                            </Typography>
+                        </Box>
+                    )}
                     {selectedDoc.director_comment && (
                         <Box sx={{ bgcolor: '#fff5f5', p: 0.5, borderRadius: 1, border: '1px solid #ffcdd2', display: 'flex', alignItems: 'center', gap: 1 }}>
                             <CommentIcon sx={{ fontSize: 14, color: 'error.main' }} />
@@ -1029,7 +1129,17 @@ const PsdAnalystPage: React.FC = () => {
                     onClick={() => { setOnlyUnmatched(!onlyUnmatched); setPage(1); }}>
                     Несопоставленные
                   </Button>
-                  
+
+                  {/* Индикатор прогресса обработки */}
+                  {matches.length > 0 && (
+                    <Chip
+                      size="small"
+                      color={matches.filter(m => m.enstru_code || m.not_in_ktp_registry).length === matches.length ? 'success' : 'warning'}
+                      label={`${matches.filter(m => m.enstru_code || m.not_in_ktp_registry).length}/${matches.length} обработано`}
+                      sx={{ fontSize: '0.7rem' }}
+                    />
+                  )}
+
                   <Box sx={{ flexGrow: 1 }} />
                   
                   <Stack direction="row" spacing={1}>
@@ -1142,9 +1252,9 @@ const PsdAnalystPage: React.FC = () => {
                       </TableCell>
                       <TableCell>
                         <Chip 
-                          label={getMatchTypeStyles(m.match_type).label}
-                          color={getMatchTypeStyles(m.match_type).color as any}
-                          icon={m.match_type === 'manual_ktp' ? <LibraryIcon sx={{ fontSize: '12px !important' }} /> : undefined}
+                          label={getMatchTypeStyles(m.match_type, m.not_in_ktp_registry).label}
+                          color={getMatchTypeStyles(m.match_type, m.not_in_ktp_registry).color as any}
+                          icon={m.match_type === 'manual_ktp' && !m.not_in_ktp_registry ? <LibraryIcon sx={{ fontSize: '12px !important' }} /> : undefined}
                           size="small" 
                           sx={{ fontSize: '0.7rem' }} 
                         />
@@ -1159,7 +1269,53 @@ const PsdAnalystPage: React.FC = () => {
                 </TableBody>
               </Table>
             </TableContainer>
-            
+
+            {/* Комментарий аналитика для заключения */}
+            {selectedDoc && (selectedDoc.status === 'ASSIGNED_TO_ANALYST' || selectedDoc.status === 'REJECTED_BY_DIRECTOR' || selectedDoc.status === 'ANALYST_WORKING' || selectedDoc.status === 'FOR_APPROVAL' || selectedDoc.status === 'APPROVED' || selectedDoc.status === 'COMPLETED' || selectedDoc.status === 'SENT') && (
+              <Paper sx={{ mt: 3, p: 2, borderRadius: 2, border: '1px solid #e0e0e0', borderLeft: '4px solid #1976d2' }}>
+                <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CommentIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                  Комментарий аналитика для заключения
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                  Этот комментарий включается в DOCX заключение и виден директору ДРВЦ
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  placeholder="Введите дополнительный комментарий к заключению..."
+                  value={analystComment}
+                  onChange={(e) => setAnalystComment(e.target.value)}
+                  disabled={savingComment || (selectedDoc.status === 'APPROVED' || selectedDoc.status === 'COMPLETED' || selectedDoc.status === 'SENT')}
+                  sx={{ mb: 1.5 }}
+                />
+                {/* Показываем кнопку сохранения только аналитику, пока документ в работе */}
+                {(selectedDoc.status === 'ASSIGNED_TO_ANALYST' || selectedDoc.status === 'REJECTED_BY_DIRECTOR' || selectedDoc.status === 'ANALYST_WORKING' || selectedDoc.status === 'FOR_APPROVAL') && selectedDoc.assigned_to === currentUser?.id && (
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="primary"
+                      onClick={handleSaveAnalystComment}
+                      disabled={savingComment}
+                      startIcon={savingComment ? <CircularProgress size={14} color="inherit" /> : null}
+                    >
+                      {savingComment ? 'Сохранение...' : 'Сохранить комментарий'}
+                    </Button>
+                  </Box>
+                )}
+                {/* Для директора и завершенных документов - только отображение инфо */}
+                {(selectedDoc.status === 'APPROVED' || selectedDoc.status === 'COMPLETED' || selectedDoc.status === 'SENT' || (selectedDoc.status === 'FOR_APPROVAL' && selectedDoc.assigned_to !== currentUser?.id)) && (
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {selectedDoc.analyst_comment ? 'Комментарий будет включен в заключение' : 'Аналитик не добавил комментарий'}
+                    </Typography>
+                  </Box>
+                )}
+              </Paper>
+            )}
+
             <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
               <Pagination size="small" count={Math.ceil(totalCount / 50)} page={page}
                 onChange={(_, v) => setPage(v)} color="primary" />
@@ -1417,6 +1573,36 @@ const PsdAnalystPage: React.FC = () => {
                       ТЕКУЩАЯ БИБЛИОТЕКА
                     </Typography>
                   </Box>
+
+                  {/* Отметка аналитика - Нет в реестре КТП */}
+                  <Box sx={{ p: 1.5, borderBottom: '1px solid #e0e0e0', bgcolor: '#fff3e0' }}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          size="small"
+                          checked={editingMatch?.not_in_ktp_registry || false}
+                          onChange={(e) => {
+                            const id = editingMatch?.item_id || editingMatch?.id;
+                            if (id) {
+                              saveNotInKtpRegistry(id, e.target.checked);
+                            }
+                          }}
+                          color="warning"
+                        />
+                      }
+                      label={
+                        <Typography variant="caption" color={editingMatch?.not_in_ktp_registry ? 'warning.main' : 'text.secondary'}>
+                          Нет в реестре КТП
+                        </Typography>
+                      }
+                    />
+                    {editingMatch?.not_in_ktp_registry && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontStyle: 'italic' }}>
+                        Сопоставление сброшено
+                      </Typography>
+                    )}
+                  </Box>
+
                   <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 1.5 }}>
                     {library.length === 0 ? (
                       <Typography variant="caption" color="text.secondary" sx={{ p: 1, display: 'block' }}>

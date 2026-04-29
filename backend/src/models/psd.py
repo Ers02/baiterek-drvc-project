@@ -32,6 +32,7 @@ class ExternalDocument(Base):
     result_file_path = Column(String(500), nullable=True) # Путь к ZIP архиву (отчет + заключение)
     error_message = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    analyst_comment = Column(Text, nullable=True) # Комментарий аналитика для заключения
     director_comment = Column(Text, nullable=True) # Комментарий директора при возврате на доработку
 
     deadline_days = Column(Integer, nullable=True) # Срок в рабочих днях
@@ -62,7 +63,9 @@ class PsdDocumentItem(Base):
     clean_name = Column(Text, nullable=True)
     is_product = Column(Boolean, default=True)
     skip_search = Column(Boolean, default=False)
-    enstru_code = Column(String(35), ForeignKey("enstru.code"), nullable=True)
+    not_in_ktp_registry = Column(Boolean, default=False)
+    # Убрали ForeignKey на enstru - код ENSTRU берем из Реестра КТП, не из справочника
+    enstru_code = Column(String(35), nullable=True)
     enstru_name = Column(Text, nullable=True)
     match_type = Column(String(20), default="none")
     match_score = Column(Integer, nullable=True)
@@ -80,7 +83,8 @@ class AgskReestrKtpMatch(Base):
     __tablename__ = "agsk_reestr_ktp_matches"
     id = Column(Integer, primary_key=True)
     agsk_code = Column(String(50), nullable=False, index=True)
-    enstru_code = Column(String(35), ForeignKey("enstru.code"), nullable=False, index=True)
+    # Убрали ForeignKey на enstru.code - сопоставление идет с Реестром КТП, не со справочником
+    enstru_code = Column(String(35), nullable=False, index=True)
     
     ktp_id = Column(Integer, ForeignKey("reestr_ktp.id"), nullable=False)
     

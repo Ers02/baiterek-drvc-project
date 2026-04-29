@@ -81,6 +81,7 @@ class PsdDocumentItemSchema(BaseModel):
     match_type: str
     match_score: Optional[int] = None
     match_reason: Optional[str] = None
+    not_in_ktp_registry: bool = False
     agsk_name_ru: Optional[str] = None
     agsk_full_name: Optional[str] = None
 

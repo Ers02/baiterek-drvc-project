@@ -79,7 +79,23 @@ def submit_for_approval(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """Аналитик отправляет на утверждение директору."""
+    """Аналитик отправляет на утверждение директору.
+    Проверяет что все позиции обработаны (есть enstru_code или not_in_ktp_registry)."""
+
+    # Проверяем что все позиции обработаны
+    unprocessed_items = db.query(models.PsdDocumentItem).filter(
+        models.PsdDocumentItem.document_id == doc_id,
+        models.PsdDocumentItem.enstru_code.is_(None),
+        models.PsdDocumentItem.not_in_ktp_registry.is_(False) | models.PsdDocumentItem.not_in_ktp_registry.is_(None)
+    ).all()
+
+    if unprocessed_items:
+        items_list = [f"{item.position_number or '—'}: {item.name[:50]}..." for item in unprocessed_items[:5]]
+        error_msg = f"Нельзя отправить на утверждение. Есть необработанные позиции ({len(unprocessed_items)} шт.):\n" + "\n".join(items_list)
+        if len(unprocessed_items) > 5:
+            error_msg += f"\n... и еще {len(unprocessed_items) - 5} позиций"
+        raise HTTPException(status_code=400, detail=error_msg)
+
     try:
         psd_service.submit_for_approval(db, doc_id)
         return {"status": "success"}
@@ -136,6 +152,43 @@ def get_analysts_list(db: Session = Depends(get_db)):
 @router.get("/document-items/{doc_id}", response_model=PsdItemsResponse)
 def get_document_items(doc_id: int, only_unmatched: bool = False, search: Optional[str] = None, skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
     return psd_service.get_document_items_with_matches(db, doc_id, only_unmatched, search, skip, limit)
+
+@router.get("/document-items/{doc_id}/item/{item_id}")
+def get_document_item(doc_id: int, item_id: int, db: Session = Depends(get_db)):
+    """Получить одну позицию документа с актуальными данными."""
+    item = db.query(models.PsdDocumentItem).filter(
+        models.PsdDocumentItem.id == item_id,
+        models.PsdDocumentItem.document_id == doc_id
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+
+    # Загружаем инфо об АГСК
+    agsk_info = None
+    if item.code_sn:
+        agsk_info = db.query(models.Agsk).filter(models.Agsk.code == item.code_sn).first()
+
+    return {
+        "id": item.id,
+        "item_id": item.id,
+        "document_id": item.document_id,
+        "position_number": item.position_number,
+        "name": item.name,
+        "code_sn": item.code_sn,
+        "unit": item.unit,
+        "volume": float(item.volume) if item.volume else 0,
+        "price": float(item.price) if item.price else 0,
+        "total_amount": float(item.total_amount) if item.total_amount else 0,
+        "enstru_code": item.enstru_code,
+        "enstru_name": item.enstru_name,
+        "match_type": item.match_type,
+        "match_score": item.match_score,
+        "match_reason": item.match_reason,
+        "not_in_ktp_registry": bool(item.not_in_ktp_registry) if item.not_in_ktp_registry is not None else False,
+        "can_edit": True,
+        "agsk_name_ru": agsk_info.name_ru if agsk_info else None,
+        "agsk_full_name": agsk_info.full_name if agsk_info else None,
+    }
 
 @router.post("/manual-match", response_model=AgskLibraryItemSchema)
 def create_manual_match(match_data: ManualMatchCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
@@ -229,6 +282,26 @@ def generate_conclusion_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
+@router.post("/documents/{doc_id}/analyst-comment")
+def save_analyst_comment(
+    doc_id: int,
+    comment: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Аналитик сохраняет комментарий к заключению."""
+    doc = db.query(models.ExternalDocument).filter(models.ExternalDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+
+    # Проверяем, что текущий пользователь назначен как аналитик или является админом/директором
+    if doc.assigned_to != current_user.id and current_user.role not in [models.UserRole.ADMIN, models.UserRole.DIRECTOR_DRVC]:
+        raise HTTPException(status_code=403, detail="Нет прав для редактирования комментария")
+
+    doc.analyst_comment = comment
+    db.commit()
+    return {"status": "success", "analyst_comment": comment}
+
 @router.post("/documents/{doc_id}/send-to-do")
 async def send_result_to_do(
     doc_id: int,
@@ -242,3 +315,40 @@ async def send_result_to_do(
     from ..services.external_service import send_result_to_callback
     result = await send_result_to_callback(db, doc_id)
     return result
+
+
+@router.post("/document-items/{item_id}/not-in-ktp-registry")
+def save_not_in_ktp_registry(
+    item_id: int,
+    value: bool = Body(..., embed=True, description="true - нет в реестре КТП, false - сбросить"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Отмечает позицию как "Нет в реестре КТП".
+    При установке true сбрасывает сопоставление и деактивирует записи в библиотеке для этого АГСК.
+    """
+    item = db.query(models.PsdDocumentItem).filter(models.PsdDocumentItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Позиция документа не найдена")
+
+    item.not_in_ktp_registry = value
+
+    # Если отмечено "нет в реестре", сбрасываем сопоставление
+    if value:
+        item.enstru_code = None
+        item.enstru_name = None
+        item.match_type = "none"
+        item.match_score = None
+        item.match_reason = None
+
+        # Деактивируем все записи в библиотеке для этого АГСК кода
+        # (аналитик сказал что нет в реестре, значит ранее добавленные сопоставления ошибочны)
+        if item.code_sn:
+            db.query(models.AgskReestrKtpMatch).filter(
+                models.AgskReestrKtpMatch.agsk_code == item.code_sn,
+                models.AgskReestrKtpMatch.is_active == True
+            ).update({"is_active": False})
+
+    db.commit()
+    return {"status": "success", "item_id": item_id, "not_in_ktp_registry": value}

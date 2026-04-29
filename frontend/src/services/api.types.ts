@@ -231,6 +231,7 @@ export interface ExternalDocument {
   result_file_path?: string;
   error_message?: string;
   notes?: string;
+  analyst_comment?: string; // Комментарий аналитика для заключения
   director_comment?: string; // Комментарий директора при возврате на доработку
   deadline_days?: number;     // Срок в рабочих днях
   deadline_at?: string;       // Рассчитанная дата дедлайна (ISO date string)
