@@ -23,3 +23,13 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+/backend/alembic/versions/0e3188729ab3_remove_additional_specs_kz.py
+/backend/alembic/versions/1db0735cc7fc_remove_enstru_from_agsk_matches.py
+/backend/uploads/4472b6a2-6023-43c3-ac63-5571075de151_KENML (1).zip
+/backend/alembic/versions/5669086d393a_add_not_ktp.py
+/backend/uploads/d1a176ad-2cb7-4df1-b4af-65e4355a69f4_KENML (1).zip
+/backend/uploads/e8fc9e82-9af9-4b36-bb9f-79b39c8e3460_KENML (1).zip
+/backend/alembic/versions/ee71551c0db6_removeenstrufrompsditems.py
+/backend/uploads/f6aed5ef-5387-4818-9361-17c190fa1655_import_template_full.xlsx
+/backend/alembic/versions
+/docs/Акт ввода СМР.docx
