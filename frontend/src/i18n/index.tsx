@@ -1,10 +1,11 @@
 import { createContext, useState, useContext } from 'react';
 import type { PropsWithChildren } from 'react';
-import { translations } from './translations'; // Импортируем translations из нового файла
+import { translations } from './translations';
+import type { Translations } from './translations'; // Directly import Translations type
 
 export type Lang = 'ru' | 'kk';
 
-export type Translations = keyof typeof translations.ru; // Определяем тип здесь
+// export type Translations = keyof typeof translations.ru; // Removed this line as it's now imported
 
 interface LangContextType {
   lang: Lang;

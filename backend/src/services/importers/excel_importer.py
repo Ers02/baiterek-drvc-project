@@ -14,7 +14,6 @@ class ImportRow(BaseModel):
     row_idx: int
     trucode: str
     additional_specs: str
-    additional_specs_kz: str
     unit_raw: Optional[str] = None
     quantity: Decimal = Field(gt=0)
     price: Decimal = Field(ge=0)
@@ -52,26 +51,25 @@ def parse_excel_rows(ws) -> list[dict]:
         row_data = list(row) + [None] * max(0, 16 - len(row))
         
         try:
-            qty = row_data[6]
-            price = row_data[7]
-            res_share = row_data[14]
+            qty = row_data[5]
+            price = row_data[6]
+            res_share = row_data[13]
             if res_share is None: res_share = 100
-            
+
             data = {
                 "row_idx": row_idx,
                 "trucode": str(row_data[1]) if row_data[1] else "",
                 "additional_specs": str(row_data[3]).strip() if row_data[3] else "",
-                "additional_specs_kz": str(row_data[4]).strip() if row_data[4] else "",
-                "unit_raw": str(row_data[5]).strip() if row_data[5] else None,
+                "unit_raw": str(row_data[4]).strip() if row_data[4] else None,
                 "quantity": qty,
                 "price": price,
-                "kato_purchase_code": extract_code(row_data[9]) or "",
-                "kato_delivery_code": extract_code(row_data[10]) or "",
-                "expense_id": int(extract_code(row_data[11]) or 0),
-                "source_id": int(extract_code(row_data[12]) or 0),
-                "agsk_code": str(row_data[13]).strip() if (row_data[13] and str(row_data[13]).strip()) else None,
+                "kato_purchase_code": extract_code(row_data[8]) or "",
+                "kato_delivery_code": extract_code(row_data[9]) or "",
+                "expense_id": int(extract_code(row_data[10]) or 0),
+                "source_id": int(extract_code(row_data[11]) or 0),
+                "agsk_code": str(row_data[12]).strip() if (row_data[12] and str(row_data[12]).strip()) else None,
                 "resident_share": res_share,
-                "non_resident_reason": str(row_data[15]).strip() if row_data[15] else None
+                "non_resident_reason": str(row_data[14]).strip() if row_data[14] else None
             }
             rows.append(data)
         except Exception as e:
@@ -262,7 +260,6 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
             kato_purchase_id=kato_p_id,
             kato_delivery_id=kato_d_id,
             additional_specs=row.additional_specs,
-            additional_specs_kz=row.additional_specs_kz,
             quantity=quantity,
             price_per_unit=row.price,
             total_amount=quantity * row.price,

@@ -1,6 +1,6 @@
 // --- Типы Справочников ---
 export interface Mkei { id: number; code: string; name_ru: string; name_kz: string; }
-export interface Kato { id: number; parent_id: number | null; code: string; name_ru: string; name_kz: string; }
+export interface Kato { id: number; parent_id: number | null; code: string; name_ru: string; name_kz: string; has_children: boolean; }
 export interface Agsk { id: number; group: string; code: string; name_ru: string; }
 export interface CostItem { id: number; name_ru: string; name_kz: string; }
 export interface SourceFunding { id: number; name_ru: string; name_kz: string; }
@@ -33,12 +33,13 @@ export interface Enstru {
 }
 
 // --- Роли пользователей ---
-export enum UserRole {
-  ADMIN = "admin",
-  DIRECTOR_DRVC = "director_drvc",
-  ANALYST_DRVC = "analyst_drvc",
-  USER = "user",
-}
+export const UserRole = {
+  ADMIN: "admin",
+  DIRECTOR_DRVC: "director_drvc",
+  ANALYST_DRVC: "analyst_drvc",
+  USER: "user",
+} as const;
+export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 // --- Пользователь ---
 export interface User {
@@ -61,11 +62,12 @@ export interface UserLookup { id: number; full_name: string; }
 
 // --- Основные Типы ---
 export type NeedType = "Товар" | "Работа" | "Услуга";
-export enum PlanStatus {
-  DRAFT = "DRAFT",
-  PRE_APPROVED = "PRE_APPROVED",
-  APPROVED = "APPROVED",
-}
+export const PlanStatus = {
+  DRAFT: "DRAFT",
+  PRE_APPROVED: "PRE_APPROVED",
+  APPROVED: "APPROVED",
+} as const;
+export type PlanStatus = typeof PlanStatus[keyof typeof PlanStatus];
 
 export interface PlanItemVersion {
   id: number;
@@ -96,12 +98,12 @@ export interface PlanItemVersion {
   // Новые поля для статуса исполнения
   executed_quantity: number;
   executed_amount: number;
+  executed_vc_amount: number;
   
   // Новое поле для ВЦ
   min_dvc_percent: number;
   
   additional_specs?: string;
-  additional_specs_kz?: string;
   vc_amount: number;
 
   enstru?: Enstru;
@@ -154,7 +156,6 @@ export interface PlanItemPayload {
   kato_purchase_id?: number;
   kato_delivery_id?: number;
   additional_specs?: string;
-  additional_specs_kz?: string;
   quantity: number;
   price_per_unit: number;
   is_ktp: boolean;
@@ -216,6 +217,7 @@ export type ExternalDocumentStatus =
 
 export interface ExternalDocument {
   id: number;
+  document_number?: string;
   doc_type: string;
   bank_name: string;
   sender_first_name?: string;

@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n/index.tsx';
 import Header from '../components/Header';
 import {
-  getPlans, deletePlan, createPlan, deleteLatestVersion, exportVersionToExcel,
+  getPlans, deletePlan, createPlan, deleteLatestVersion, exportVersionToExcel, createVersion,
   PlanStatus
 } from '../services/api';
 import type { ProcurementPlan } from '../services/api';
@@ -43,9 +43,9 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
   const [isErrorDialogOpen, setErrorDialogOpen] = useState(false);
   const [errorDialogMessage, setErrorDialogMessage] = useState('');
 
-  const handleError = (err: any, defaultMessage: string) => {
-    const message = err.response?.data?.detail || defaultMessage;
-    setErrorDialogMessage(message);
+  const handleError = (err: unknown, defaultMessage: string) => {
+    const message = err instanceof Error ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
+    setErrorDialogMessage(message || defaultMessage);
     setErrorDialogOpen(true);
   };
 
@@ -54,7 +54,7 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
       try {
         const newVersion = await createVersion(plan.id);
         navigate(`/plans/${newVersion.plan_id}`);
-      } catch (err) {
+      } catch (err: unknown) {
         handleError(err, t('error_creating_version'));
       }
     }
@@ -65,7 +65,7 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
       try {
         await deleteLatestVersion(plan.id);
         onReload();
-      } catch (err) {
+      } catch (err: unknown) {
         handleError(err, t('error_deleting_version'));
       }
     }
@@ -76,7 +76,7 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
       try {
         await deletePlan(plan.id);
         onReload();
-      } catch (err) {
+      } catch (err: unknown) {
         handleError(err, t('error_deleting_plan'));
       }
     }
@@ -113,7 +113,7 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
         </TableCell>
         <TableCell width="150px">
           <Chip
-            label={isExecuted ? t('status_EXECUTED') : t(`status_${activeVersion?.status}`)}
+            label={isExecuted ? t('status_EXECUTED') : t(`status_${activeVersion?.status || 'DRAFT'}`)}
             color={getStatusChipColor(activeVersion?.status || PlanStatus.DRAFT, isExecuted)}
             size="small"
             icon={isExecuted ? <CheckCircleIcon /> : undefined}
@@ -187,7 +187,7 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
                       </TableCell>
                       <TableCell>
                         <Chip 
-                            label={version.is_executed ? t('status_EXECUTED') : t(`status_${version.status}`)}
+                            label={version.is_executed ? t('status_EXECUTED') : t(`status_${version.status || 'DRAFT'}`)}
                             color={getStatusChipColor(version.status, version.is_executed)} 
                             size="small" 
                         />
@@ -238,10 +238,10 @@ export default function Dashboard() {
   let userRole = null;
   if (token) {
       try {
-          const decoded: any = jwtDecode(token);
+          const decoded: { is_admin?: boolean; role?: string } = jwtDecode(token);
           isAdmin = decoded.is_admin === true;
           userRole = decoded.role; // Добавляем получение роли
-      } catch (e) {}
+      } catch { /* ignore */ }
   }
 
   const loadPlans = async () => {
@@ -251,9 +251,8 @@ export default function Dashboard() {
       const data = await getPlans();
       // Аналитик ДРВЦ видит все планы в обратном порядке
       setPlans(data.sort((a, b) => b.id - a.id));
-    } catch (err) {
+    } catch {
       setError(t('error_loading_plans'));
-      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -278,12 +277,12 @@ export default function Dashboard() {
       const newPlan = await createPlan({ plan_name: newPlanName, year: newPlanYear });
       setCreateDialogOpen(false);
       navigate(`/plans/${newPlan.id}`);
-    } catch (err) {
+    } catch {
       setError(t('error_creating_plan'));
     }
   };
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setCurrentTab(newValue);
   };
 
@@ -321,12 +320,12 @@ export default function Dashboard() {
       <Header />
       <Container maxWidth={false} sx={{ py: 4, px: { xs: 2, md: 4 } }}>
         <Grid container spacing={3} alignItems="center" sx={{ mb: 4 }}>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
                 <Typography variant="h4" fontWeight="bold">
                     {isAdmin ? t('dashboard_title') : userRole === 'analyst_drvc' ? 'Панель Аналитика ДРВЦ' : t('dashboard_title')}
                 </Typography>
             </Grid>
-            <Grid item xs={12} sm={6} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
+            <Grid size={{ xs: 12, sm: 6 }} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
                 {isAdmin ? (
                     <Button 
                         variant="contained" 
@@ -346,7 +345,7 @@ export default function Dashboard() {
 
         <Paper sx={{ mb: 3, p: 2 }}>
             <Grid container spacing={2} alignItems="center">
-                <Grid item xs={12} md={4}>
+                <Grid size={{ xs: 12, md: 4 }}>
                     <TextField
                         fullWidth
                         size="small"
@@ -363,7 +362,7 @@ export default function Dashboard() {
                         }}
                     />
                 </Grid>
-                <Grid item xs={12} md={8}>
+                <Grid size={{ xs: 12, md: 8 }}>
                     <Tabs 
                         value={currentTab} 
                         onChange={handleTabChange} 

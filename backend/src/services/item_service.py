@@ -151,7 +151,7 @@ def revert_item(db: Session, item_id: int, user: models.User) -> models.PlanItem
     fields_to_copy = [
         'trucode', 'unit_id', 'expense_item_id', 'funding_source_id',
         'agsk_id', 'kato_purchase_id', 'kato_delivery_id',
-        'additional_specs', 'additional_specs_kz',
+        'additional_specs',
         'quantity', 'price_per_unit', 'total_amount',
         'is_ktp', 'resident_share', 'non_resident_reason', 'need_type',
         'revision_number'

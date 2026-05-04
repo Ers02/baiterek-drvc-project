@@ -12,7 +12,9 @@ export const translations = {
     yes: 'Да',
     no: 'Нет',
     is_ktp:'КТП',
+    no_name: 'Без названия',
     // Header
+    logout: 'Выйти',
     create_plan: 'Создать смету',
     my_procurement_plans: 'Мои сметы',
 
@@ -137,8 +139,7 @@ export const translations = {
     need_type_goods: 'Товар',
     need_type_works: 'Работа',
     need_type_services: 'Услуга',
-    additional_specs: 'Дополнительная характеристика на русском',
-    additional_specs_kz: 'Дополнительная характеристика на казахском',
+    additional_specs: 'Дополнительная характеристика',
     agsk_3: 'АГСК-3 (для СМР)',
     expense_item: 'Статья затрат',
     funding_source: 'Источник финансирования',
@@ -174,9 +175,11 @@ export const translations = {
     supplier: 'Поставщик',
     contract_info: 'Договор',
     no_records: 'Нет записей',
+    confirm_delete_execution: 'Вы уверены, что хотите удалить этот отчет об исполнении?',
     max_price: 'Макс. цена',
     video_instruction: 'Видеоинструкция',
     video_instruction_title: 'Видеоинструкция по смете',
+    video_not_supported: 'Ваш браузер не поддерживает видео.',
     // StatusChip
     status_DRAFT: 'Черновик',
     status_PRE_APPROVED: 'На согласовании',
@@ -184,7 +187,6 @@ export const translations = {
     status_EXECUTED: 'Исполненные',
 
     // Errors & Messages
-    error_additional_specs_kz_required: 'Заполните дополнительные характеристики на казахском языке.',
     error_title: 'Ошибка',
     error_loading_plans: 'Не удалось загрузить список смет.',
     error_creating_plan: 'Ошибка при создании сметы.',
@@ -198,6 +200,15 @@ export const translations = {
     error_loading_data: 'Ошибка загрузки данных.',
     error_fill_required_fields: 'Заполните все обязательные поля.',
     error_agsk_required_for_smr: 'Для СМР необходимо выбрать код АГСК-3.',
+    error_enstru_required: 'Выберите код ЕНС ТРУ.',
+    error_expense_item_required: 'Выберите статью затрат.',
+    error_funding_source_required: 'Выберите источник финансирования.',
+    error_unit_required_for_goods: 'Выберите единицу измерения.',
+    error_kato_purchase_required: 'Выберите место закупки.',
+    error_kato_delivery_required: 'Выберите место поставки.',
+    error_additional_specs_required: 'Укажите характеристику.',
+    error_quantity_required: 'Укажите количество.',
+    error_price_required: 'Укажите цену.',
     error_saving: 'Ошибка при сохранении.',
     error_loading_executions: 'Ошибка загрузки отчетов.',
     fill_required_fields: 'Заполните обязательные поля.',
@@ -207,6 +218,8 @@ export const translations = {
     error_saving_execution: 'Ошибка сохранения отчета.',
     error_deleting_execution: 'Ошибка удаления отчета.',
     error_bin_length: 'БИН должен состоять из 12 цифр.',
+    error_importing_kenml: 'Ошибка импорта KENML.',
+    no_plan_data: 'Нет данных плана.',
 
     // KatoModal
     select_kato_purchase: 'Выберите место закупки КАТО',
@@ -232,13 +245,16 @@ export const translations = {
     yes: 'Иә',
     no: 'Жоқ',
     is_ktp:'ҚТӨ',
+    no_name: 'Атаусыз',
     // Header
+    logout: 'Шығу',
     create_plan: 'Сметаны құру',
     my_procurement_plans: 'Менің сметаларым',
 
     // Dashboard
     video_instruction: 'Видеоинструкция',
     video_instruction_title: 'Видеоинструкция по смете',
+    video_not_supported: 'Браузеріңіз видеоны қолдамайды.',
     dashboard_title: 'Менің сатып алу сметаларым',
     no_plans_found: 'Сметалар табылмады.',
     no_plans_found_total: 'Сметалар табылмады.',
@@ -337,7 +353,7 @@ export const translations = {
             <li><b>Анықтамалықтар:</b> "Өлшем бірлігі (МКЕИ)", "Сатып алу орны (КАТО)", "Жеткізу орны (КАТО)", "Шығыс бабы", "Қаржыландыру көзі" өрістері үшін үлгідегі ашылмалы тізімдерден мәндерді пайдаланыңыз. Бұл тізімдер жүйедегі деректер негізінде қалыптастырылады.</li>
             <li><b>АГСК коды:</b> "Шығыс бабы" = "ҚҚЖ" (Құрылыс-монтаж жұмыстары) бар позициялар үшін "АГСК коды (ҚҚЖ үшін)" өрісі міндетті болып табылады.Егер АГСК-3 болмаса, <b>прайс-лист</b> деп көрсетіңіз.</li>
             <li><b>Сандар форматы:</b> Саны, бағасы және сомасы сандық форматта көрсетілуі керек.</li>
-            <li><b>Елшілік құндылық үлесі:</b> Қызметтер мен жұмыстар үшін 100-ге дейінгі сандық түрде көрсетіледі; егер 100-ден аз болса, міндетті түрде негіздемесін көрсетіңіз.</li>
+            <li><b>Елішілік құндылық үлесі:</b> Қызметтер мен жұмыстар үшін 100-ге дейінгі сандық түрде көрсетіледі; егер 100-ден аз болса, міндетті түрде негіздемесін көрсетіңіз.</li>
           </ul>
         </li>
         <li><b>Файлды сақтау:</b> Толтырылған файлды .xlsx форматында сақтаңыз.</li>
@@ -359,8 +375,7 @@ export const translations = {
     need_type_goods: 'Тауар',
     need_type_works: 'Жұмыс',
     need_type_services: 'Қызмет',
-    additional_specs: 'Қосымша сипаттама орыс тілінде',
-    additional_specs_kz: 'Қосымша сипаттама қазақ тілінде',
+    additional_specs: 'Қосымша сипаттама',
     agsk_3: 'АГСК-3 (ҚҚЖ үшін)',
     expense_item: 'Шығыс бабы',
     funding_source: 'Қаржыландыру көзі',
@@ -396,6 +411,7 @@ export const translations = {
     supplier: 'Жеткізуші',
     contract_info: 'Шарт',
     no_records: 'Жазбалар жоқ',
+    confirm_delete_execution: 'Бұл орындау есебін жойғыңыз келетініне сенімдісіз бе?',
     max_price: 'Макс. баға',
     error_bin_length: 'БСН 12 цифрдан тұруы керек.',
 
@@ -406,7 +422,6 @@ export const translations = {
     status_EXECUTED: 'Орындалды',
     
     // Errors & Messages
-    error_additional_specs_kz_required: 'Қосымша сипаттамаларды қазақ тілінде толтырыңыз.',
     error_title: 'Қате',
     error_loading_plans: 'Сметалар тізімін жүктеу мүмкін болмады.',
     error_creating_plan: 'Сметаны құру кезінде қате пайда болды.',
@@ -420,6 +435,15 @@ export const translations = {
     error_loading_data: 'Деректерді жүктеу қатесі.',
     error_fill_required_fields: 'Барлық міндетті өрістерді толтырыңыз.',
     error_agsk_required_for_smr: 'ҚҚЖ үшін АГСК-3 кодын таңдау қажет.',
+    error_enstru_required: 'ЕНС ТРУ кодын таңдаңыз.',
+    error_expense_item_required: 'Шығыс бабын таңдаңыз.',
+    error_funding_source_required: 'Қаржыландыру көзін таңдаңыз.',
+    error_unit_required_for_goods: 'Өлшем бірлігін таңдаңыз.',
+    error_kato_purchase_required: 'Сатып алу орнын таңдаңыз.',
+    error_kato_delivery_required: 'Жеткізу орнын таңдаңыз.',
+    error_additional_specs_required: 'Сипаттаманы көрсетіңіз.',
+    error_quantity_required: 'Санын көрсетіңіз.',
+    error_price_required: 'Бағасын көрсетіңіз.',
     error_saving: 'Сақтау кезінде қате пайда болды.',
     error_loading_executions: 'Есептерді жүктеу қатесі.',
     fill_required_fields: 'Міндетті өрістерді толтырыңыз.',
@@ -428,6 +452,8 @@ export const translations = {
     error_amount_exceeds_plan: 'Сомасы жоспардан асады.',
     error_saving_execution: 'Есепті сақтау қатесі.',
     error_deleting_execution: 'Есепті жою қатесі.',
+    error_importing_kenml: 'KENML импорттау қатесі.',
+    no_plan_data: 'Жоспар деректері жоқ.',
 
     // KatoModal
     select_kato_purchase: 'Сатып алатын орынды таңдаңыз',

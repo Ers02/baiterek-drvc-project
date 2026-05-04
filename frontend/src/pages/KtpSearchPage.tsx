@@ -7,7 +7,7 @@ import {
   Fab, Zoom
 } from '@mui/material';
 import {
-  Search as SearchIcon, Clear as ClearIcon, Inventory as InventoryIcon,
+  Search as SearchIcon, Inventory as InventoryIcon,
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
   LibraryBooks as LibraryBooksIcon, Close as CloseIcon,
   Save as SaveIcon
@@ -19,14 +19,14 @@ import {
 } from '../services/api';
 import type {
   Oked, Kpved, Tnved, Enstru, Agsk, KtpSearchResult,
-  ProductGroup, ProductGroupCreate
+  ProductGroup, ProductGroupListItem, ProductGroupCreate
 } from '../services/api.types';
 
 // Тип для редактируемой группы
 interface EditableGroup extends ProductGroup {
   isEditing?: boolean;
   isNew?: boolean;
-  // Счетчики для отображения в режиме просмотра
+  // Счетчики для отображения в режиме просмотра (из ProductGroupListItem)
   oked_count?: number;
   kpved_count?: number;
   enstru_count?: number;
@@ -35,26 +35,39 @@ interface EditableGroup extends ProductGroup {
   reestr_ktp_count?: number;
 }
 
+// Тип для элемента списка групп (счетчики из API)
+interface GroupListItem extends ProductGroupListItem {
+  oked_codes?: string[];
+  kpved_codes?: string[];
+  enstru_codes?: string[];
+  agsk3_codes?: string[];
+  tnved_codes?: string[];
+  reestr_ktp_codes?: string[];
+}
+
 // Модальный компонент для выбора справочника
-interface LookupModalProps {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const LookupModal: React.FC<{
   open: boolean;
   onClose: () => void;
   title: string;
   searchPlaceholder: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fetchData: (q?: string) => Promise<any[]>;
-  selectedItems: any[];
-  onSelect: (items: any[]) => void;
+  selectedItems: string[];
+  onSelect: (items: string[]) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getOptionLabel: (item: any) => string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   extractCode: (item: any) => string;
-}
-
-const LookupModal: React.FC<LookupModalProps> = ({
+}> = ({
   open, onClose, title, searchPlaceholder, fetchData, selectedItems, onSelect, getOptionLabel, extractCode
 }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [options, setOptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [tempSelected, setTempSelected] = useState<any[]>([]);
+  const [tempSelected, setTempSelected] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -80,13 +93,14 @@ const LookupModal: React.FC<LookupModalProps> = ({
         return code && code.trim() !== '';
       });
       setOptions(validOptions);
-    } catch (err) {
-      console.error('Failed to load options:', err);
+    } catch {
+      // ignore
     } finally {
       setLoading(false);
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleToggle = (item: any) => {
     const code = extractCode(item);
     // Игнорируем пустые коды
@@ -132,7 +146,7 @@ const LookupModal: React.FC<LookupModalProps> = ({
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
               {tempSelected.map(code => (
-                <Chip key={code} size="small" label={code} onDelete={() => handleToggle({ code })} color="primary" />
+                <Chip key={code} size="small" label={code} onDelete={() => setTempSelected(tempSelected.filter(c => c !== code))} color="primary" />
               ))}
             </Box>
           </Box>
@@ -200,7 +214,7 @@ const KtpSearchPage: React.FC = () => {
     setLoading(true);
     try {
       const data = await getProductGroups();
-      setGroups(data.map(g => ({
+      setGroups(data.map((g: GroupListItem) => ({
         ...g,
         oked_codes: g.oked_codes || [],
         kpved_codes: g.kpved_codes || [],
@@ -216,8 +230,8 @@ const KtpSearchPage: React.FC = () => {
         tnved_count: g.tnved_count || 0,
         reestr_ktp_count: g.reestr_ktp_count || 0
       })));
-    } catch (err) {
-      console.error('Failed to load groups:', err);
+    } catch {
+      // ignore
     } finally {
       setLoading(false);
     }
@@ -245,7 +259,7 @@ const KtpSearchPage: React.FC = () => {
   };
 
   // Обновить группу локально
-  const updateGroupLocal = (id: number, field: keyof ProductGroup, value: any) => {
+  const updateGroupLocal = (id: number, field: keyof ProductGroup, value: unknown) => {
     setGroups(groups.map(g => g.id === id ? { ...g, [field]: value } : g));
   };
 
@@ -255,8 +269,8 @@ const KtpSearchPage: React.FC = () => {
     try {
       const fullGroup = await getProductGroup(id);
       setGroups(groups.map(g => g.id === id ? { ...fullGroup, isEditing: true } : g));
-    } catch (err) {
-      console.error('Failed to load group details:', err);
+    } catch {
+      // ignore
       alert('Ошибка при загрузке данных группы');
     } finally {
       setLoading(false);
@@ -289,8 +303,8 @@ const KtpSearchPage: React.FC = () => {
       }
 
       await loadGroups();
-    } catch (err) {
-      console.error('Failed to save group:', err);
+    } catch {
+      // ignore
       alert('Ошибка при сохранении группы');
     } finally {
       setLoading(false);
@@ -310,8 +324,8 @@ const KtpSearchPage: React.FC = () => {
     try {
       await deleteProductGroup(id);
       await loadGroups();
-    } catch (err) {
-      console.error('Failed to delete group:', err);
+    } catch {
+      // ignore
       alert('Ошибка при удалении группы');
     } finally {
       setLoading(false);
@@ -418,7 +432,7 @@ const KtpSearchPage: React.FC = () => {
           title: 'Выбор из Реестра КТП',
           placeholder: 'Поиск по названию товара...',
           fetch: async (q?: string) => {
-            const result = await searchKtpAdvanced({ query: q, skip: 0, limit: 50 });
+            const result = await searchKtpAdvanced({ q, skip: 0, limit: 50 });
             return result.items;
           },
           getLabel: (item: KtpSearchResult) => {
@@ -514,9 +528,9 @@ const KtpSearchPage: React.FC = () => {
               width: 22,
               height: 22,
               border: '1px solid',
-              borderColor: `${color}.main`,
+              borderColor: `${color}`,
               borderRadius: '6px',
-              color: `${color}.main`,
+              color: `${color}`,
             }}
           >
             <AddIcon sx={{ fontSize: 14 }} />
@@ -653,12 +667,12 @@ const KtpSearchPage: React.FC = () => {
                           {group.isEditing ? (
                             <>
                               <Tooltip title="Сохранить">
-                                <IconButton size="small" onClick={() => saveGroup(group)} sx={{ color: 'success.main' }}>
+                                <IconButton size="small" onClick={() => saveGroup(group)} color="success">
                                   <SaveIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title="Отмена">
-                                <IconButton size="small" onClick={() => group.isNew ? cancelNewGroup(group.id) : loadGroups()} sx={{ color: 'text.secondary' }}>
+                                <IconButton size="small" onClick={() => group.isNew ? cancelNewGroup(group.id) : loadGroups()} color="inherit">
                                   <CloseIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
@@ -666,12 +680,12 @@ const KtpSearchPage: React.FC = () => {
                           ) : (
                             <>
                               <Tooltip title="Редактировать">
-                                <IconButton size="small" onClick={() => startEditGroup(group.id)} sx={{ color: 'primary.main' }}>
+                                <IconButton size="small" onClick={() => startEditGroup(group.id)} color="primary">
                                   <EditIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title="Удалить">
-                                <IconButton size="small" onClick={() => deleteGroup(group.id)} sx={{ color: 'error.main' }}>
+                                <IconButton size="small" onClick={() => deleteGroup(group.id)} color="error">
                                   <DeleteIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>

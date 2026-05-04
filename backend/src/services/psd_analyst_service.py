@@ -836,7 +836,8 @@ class PsdAnalystService:
             "Наименование товара из РКТП",
             "ВЦ%",
             "Адрес",
-            "Регион"
+            "Регион",
+            "Коды АГСК из Реестра КТП"
         ]
         for col_idx, col_name in enumerate(columns2, 1):
             cell = ws2.cell(row=1, column=col_idx, value=col_name)
@@ -889,7 +890,7 @@ class PsdAnalystService:
                 rows_to_add.append(base + [
                     "Авто-подбор (КТП)", auto_ktp.company_name, auto_ktp.bin_iin, auto_ktp.product_name,
                     dvc, auto_ktp.production_address, auto_ktp.region_kato,
-                    ", ".join(auto_ktp.agsk3_codes) if auto_ktp.agsk3_codes else ""
+                    ", ".join(auto_ktp.agsk3_codes) if auto_ktp.agsk3_codes else " "
                 ])
                 selected_ktp_ids.add(auto_ktp.id)
 

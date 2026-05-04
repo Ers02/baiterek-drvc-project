@@ -49,7 +49,6 @@ class PlanItemBase(BaseModel):
     kato_purchase_id: Optional[int] = None
     kato_delivery_id: Optional[int] = None
     additional_specs: Optional[str] = None
-    additional_specs_kz: Optional[str] = None
     quantity: Decimal = Field(..., gt=0, description="Количество")
     price_per_unit: Decimal = Field(..., gt=0, description="Цена за единицу")
     is_ktp: bool = False
@@ -76,7 +75,6 @@ class PlanItemUpdate(PlanItemBase):
     kato_purchase_id: Optional[int] = None
     kato_delivery_id: Optional[int] = None
     additional_specs: Optional[str] = None
-    additional_specs_kz: Optional[str] = None
     quantity: Optional[Decimal] = Field(None, gt=0)
     price_per_unit: Optional[Decimal] = Field(None, gt=0)
     is_ktp: Optional[bool] = None
@@ -127,7 +125,6 @@ class PlanItem(BaseModel):
     start_version_number: int
 
     additional_specs: Optional[str] = None
-    additional_specs_kz: Optional[str] = None
 
     enstru: Optional[lookup_schema.Enstru] = None
     unit: Optional[lookup_schema.Mkei] = None

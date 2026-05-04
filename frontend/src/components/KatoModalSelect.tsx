@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
     Modal, Box, Button, Typography, List, ListItem, ListItemText,
     IconButton, Collapse, CircularProgress, Alert, Stack, Divider,
@@ -16,8 +16,8 @@ interface KatoItemProps {
     level: number;
     onSelect: (kato: Kato) => void;
     selectedKato: Kato | null;
-    lang: 'ru' | 'kz';
-    t: (key: string) => string;
+    lang: 'ru' | 'kk';
+    t: (key: import('../i18n/translations').Translations) => string;
 }
 
 const KatoItem: React.FC<KatoItemProps> = ({ kato, level, onSelect, selectedKato, lang, t }) => {
@@ -36,8 +36,7 @@ const KatoItem: React.FC<KatoItemProps> = ({ kato, level, onSelect, selectedKato
             try {
                 const fetchedChildren = await getKatoChildren(kato.id);
                 setChildren(fetchedChildren);
-            } catch (err) {
-                console.error("Failed to fetch KATO children:", err);
+            } catch {
                 setError(t('error_loading_children'));
             } finally {
                 setLoadingChildren(false);
@@ -49,7 +48,6 @@ const KatoItem: React.FC<KatoItemProps> = ({ kato, level, onSelect, selectedKato
     return (
         <>
             <ListItem
-                button
                 onClick={() => onSelect(kato)}
                 sx={{
                     pl: level * 2 + 2,
@@ -129,7 +127,7 @@ const KatoModalSelect: React.FC<KatoModalSelectProps> = ({ open, onClose, onSele
                 try {
                     const results = await getKato(query);
                     setSearchResults(results);
-                } catch (err) {
+                } catch {
                     setErrorSearch(t('search_error'));
                 } finally {
                     setLoadingSearch(false);
@@ -155,7 +153,7 @@ const KatoModalSelect: React.FC<KatoModalSelectProps> = ({ open, onClose, onSele
             try {
                 const data = await getKatoChildren(0);
                 setRootKato(data);
-            } catch (err) {
+            } catch {
                 setErrorHierarchy(t('error_loading_kato_regions'));
             } finally {
                 setLoadingHierarchy(false);
@@ -183,7 +181,7 @@ const KatoModalSelect: React.FC<KatoModalSelectProps> = ({ open, onClose, onSele
         onClose();
     };
 
-    const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
         setTab(newValue);
     };
 
@@ -239,7 +237,6 @@ const KatoModalSelect: React.FC<KatoModalSelectProps> = ({ open, onClose, onSele
                                     return (
                                         <ListItem
                                             key={kato.id}
-                                            button
                                             onClick={() => handleSelectKato(kato)}
                                             sx={{
                                                 backgroundColor: isSelected ? 'primary.light' : 'inherit',

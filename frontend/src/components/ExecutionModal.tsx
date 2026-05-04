@@ -2,20 +2,16 @@ import React, {useState, useEffect, useMemo, useCallback, useRef} from 'react';
 import {
     Dialog, DialogTitle, DialogContent, DialogActions, Button,
     TextField, Typography, Table, TableBody, TableCell,
-    TableContainer, TableHead, TableRow, Paper, IconButton, Box, Alert, LinearProgress, Stack, CircularProgress, Autocomplete, Link,
-    Grid, Card, CardContent, Divider, InputAdornment, Chip, Tooltip
+    TableContainer, TableHead, TableRow, Paper, IconButton, Box, Alert, LinearProgress, Stack, CircularProgress, Autocomplete,
+    Card, CardContent, Divider, InputAdornment, Chip
 } from '@mui/material';
 import {
-    Delete as DeleteIcon, 
-    Add as AddIcon, 
-    Edit as EditIcon, 
-    Refresh as RefreshIcon,
+    Delete as DeleteIcon,
+    Add as AddIcon,
     Business as BusinessIcon,
     Description as ContractIcon,
     LocalShipping as SupplyIcon,
     Percent as PercentIcon,
-    AttachMoney as MoneyIcon,
-    CalendarToday as DateIcon,
     Numbers as NumberIcon,
     Search as SearchIcon,
     Description as DescriptionIcon
@@ -40,7 +36,10 @@ const formatMoney = (val: number) => new Intl.NumberFormat('ru-RU', {style: 'cur
 const formatNumber = (val: number) => new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 3}).format(val);
 
 // --- Компонент сводки (Дашборд) ---
-const ExecutionSummary = ({ planQty, planAmt, execQty, execAmt, t }: { planQty: number, planAmt: number, execQty: number, execAmt: number, t: any }) => {
+import type { Translations } from '../i18n/translations';
+type TranslationFunc = (key: Translations) => string;
+
+const ExecutionSummary = ({ planQty, planAmt, execQty, execAmt, t }: { planQty: number, planAmt: number, execQty: number, execAmt: number, t: TranslationFunc }) => {
     const qtyPercent = Math.min((execQty / planQty) * 100, 100);
     const amtPercent = Math.min((execAmt / planAmt) * 100, 100);
     const remainingQty = planQty - execQty;
@@ -71,7 +70,7 @@ const ExecutionSummary = ({ planQty, planAmt, execQty, execAmt, t }: { planQty: 
                         <Typography variant="caption">
                             Факт: <b>{formatNumber(execQty)}</b> / {formatNumber(planQty)}
                         </Typography>
-                        <Typography variant="caption" color={remainingQty < 0 ? "error.main" : "text.secondary"}>
+                        <Typography variant="caption" color={remainingQty < 0 ? "error" : "text.secondary"}>
                             Остаток: {formatNumber(remainingQty)}
                         </Typography>
                     </Stack>
@@ -100,7 +99,7 @@ const ExecutionSummary = ({ planQty, planAmt, execQty, execAmt, t }: { planQty: 
                         <Typography variant="caption">
                             Факт: <b>{formatMoney(execAmt)}</b>
                         </Typography>
-                        <Typography variant="caption" color={remainingAmt < 0 ? "error.main" : "text.secondary"}>
+                        <Typography variant="caption" color={remainingAmt < 0 ? "error" : "text.secondary"}>
                             Остаток: {formatMoney(remainingAmt)}
                         </Typography>
                     </Stack>
@@ -114,7 +113,7 @@ const ExecutionSummary = ({ planQty, planAmt, execQty, execAmt, t }: { planQty: 
 const ExecutionList = React.memo(({executions, onDelete, t}: {
     executions: Execution[],
     onDelete: (id: number) => void,
-    t: (key: string) => string
+    t: TranslationFunc
 }) => {
     return (
         <Box sx={{ mt: 4 }}>
@@ -148,13 +147,13 @@ const ExecutionList = React.memo(({executions, onDelete, t}: {
                                 <TableCell align="right">
                                     <Box>
                                         <Typography variant="body2">Дог: {formatNumber(exec.contract_quantity)}</Typography>
-                                        <Typography variant="caption" color="success.main" fontWeight="bold">Факт: {formatNumber(exec.supply_volume_physical)}</Typography>
+                                        <Typography variant="caption" color="success" fontWeight="bold">Факт: {formatNumber(exec.supply_volume_physical)}</Typography>
                                     </Box>
                                 </TableCell>
                                 <TableCell align="right">
                                     <Box>
                                         <Typography variant="body2">{formatMoney(exec.contract_sum)}</Typography>
-                                        <Typography variant="caption" color="success.main" fontWeight="bold">{formatMoney(exec.supply_volume_value)}</Typography>
+                                        <Typography variant="caption" color="success" fontWeight="bold">{formatMoney(exec.supply_volume_value)}</Typography>
                                     </Box>
                                 </TableCell>
                                 <TableCell align="right">
@@ -201,7 +200,7 @@ const ExecutionForm = React.memo(({
     executedQuantity: number,
     executedAmount: number,
     onSuccess: () => void,
-    t: (key: string) => string,
+    t: TranslationFunc,
     trucode: string,
     needType: string
 }) => {
@@ -277,7 +276,7 @@ const ExecutionForm = React.memo(({
         }
     };
     
-    const handleCertificateSelect = (event: any, newValue: KtpSupplier | null) => {
+    const handleCertificateSelect = (_event: unknown, newValue: KtpSupplier | null) => {
         setSelectedCertificate(newValue);
         setFactVcPercentage(newValue?.dvc_percent ? String(newValue.dvc_percent) : '0');
     };
@@ -324,8 +323,9 @@ const ExecutionForm = React.memo(({
             setContractQuantity(''); setSupplyPhysical(''); setPrice('');
             setError('');
             onSuccess();
-        } catch (err: any) {
-            setError(err.response?.data?.detail || t('error_saving_execution'));
+        } catch (err: unknown) {
+            const errorMsg = err instanceof Error ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
+            setError(errorMsg || t('error_saving_execution'));
         }
     };
     
@@ -572,8 +572,7 @@ const ExecutionModal: React.FC<ExecutionModalProps> = ({
         try {
             const data = await getExecutionsByItem(itemId);
             setExecutions(data);
-        } catch (err) {
-            console.error(err);
+        } catch {
             setError(t('error_loading_executions'));
         } finally {
             setLoading(false);
@@ -585,7 +584,7 @@ const ExecutionModal: React.FC<ExecutionModalProps> = ({
             try {
                 await deleteExecution(id);
                 loadExecutions();
-            } catch (err) {
+            } catch {
                 setError(t('error_deleting_execution'));
             }
         }
@@ -608,34 +607,39 @@ const ExecutionModal: React.FC<ExecutionModalProps> = ({
             </DialogTitle>
             
             <DialogContent sx={{ p: 3, bgcolor: '#fafafa' }}>
+                {loading && <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress /></Box>}
                 {error && <Alert severity="error" sx={{mb: 2}}>{error}</Alert>}
 
-                <ExecutionSummary 
-                    planQty={planQuantity} 
-                    planAmt={planAmount} 
-                    execQty={executedQuantity}
-                    execAmt={executedAmount} 
-                    t={t} 
-                />
+                {!loading && (
+                    <>
+                        <ExecutionSummary
+                            planQty={planQuantity}
+                            planAmt={planAmount}
+                            execQty={executedQuantity}
+                            execAmt={executedAmount}
+                            t={t}
+                        />
 
-                <ExecutionForm
-                    itemId={itemId}
-                    planQuantity={planQuantity}
-                    planAmount={planAmount}
-                    planPricePerUnit={planPricePerUnit}
-                    executedQuantity={executedQuantity}
-                    executedAmount={executedAmount}
-                    onSuccess={loadExecutions}
-                    t={t}
-                    trucode={trucode}
-                    needType={needType}
-                />
+                        <ExecutionForm
+                            itemId={itemId}
+                            planQuantity={planQuantity}
+                            planAmount={planAmount}
+                            planPricePerUnit={planPricePerUnit}
+                            executedQuantity={executedQuantity}
+                            executedAmount={executedAmount}
+                            onSuccess={loadExecutions}
+                            t={t}
+                            trucode={trucode}
+                            needType={needType}
+                        />
 
-                <ExecutionList
-                    executions={executions}
-                    onDelete={handleDelete}
-                    t={t}
-                />
+                        <ExecutionList
+                            executions={executions}
+                            onDelete={handleDelete}
+                            t={t}
+                        />
+                    </>
+                )}
             </DialogContent>
             <DialogActions sx={{ p: 2, borderTop: '1px solid #eee', bgcolor: '#fff' }}>
                 <Button onClick={onClose} variant="outlined">{t('close')}</Button>

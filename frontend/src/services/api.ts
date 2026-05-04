@@ -3,7 +3,7 @@ import type {
     Mkei, Kato, Agsk, CostItem, SourceFunding, Enstru, UserLookup,
     NeedType, PlanItemVersion, ProcurementPlanVersion, ProcurementPlan, PlanItemPayload,
     Execution, ExecutionPayload, KtpSupplier,
-    ProductGroup, ProductGroupListItem, ProductGroupCreate, ReestrKtpItem
+    ProductGroup, ProductGroupListItem, ProductGroupCreate
 } from './api.types';
 import { PlanStatus } from './api.types';
 

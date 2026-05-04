@@ -3,12 +3,12 @@ import {
   Box, Container, Typography, Paper, Tabs, Tab, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   CircularProgress, Alert, Chip, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, MenuItem, IconButton, Tooltip, Grid, Card, CardContent, Divider
+  TextField, MenuItem, IconButton, Tooltip, Grid, Card, Divider
 } from '@mui/material';
 import { 
     Upload as UploadIcon, Person as PersonIcon, Description as DescriptionIcon, 
     Analytics as AnalyticsIcon, Inbox as InboxIcon, Download as DownloadIcon,
-    Send as SendIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon,
+    Send as SendIcon, CheckCircle as CheckCircleIcon,
     AccessTime as AccessTimeIcon, InsertChart as InsertChartIcon,
     MonetizationOn as MonetizationOnIcon, PieChart as PieChartIcon,
     ListAlt as ListAltIcon, Category as CategoryIcon,
@@ -52,16 +52,32 @@ ChartJS.register(
   ArcElement // Register ArcElement for Pie charts
 );
 
+interface User {
+  id: number;
+  iin: string;
+  full_name: string;
+  org_name: string;
+  email: string;
+  is_active: boolean;
+}
+
 const UsersTab = () => {
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    adminGetUsers()
-      .then(setUsers)
-      .catch(() => setError("Не удалось загрузить пользователей."))
-      .finally(() => setLoading(false));
+    const loadUsers = async () => {
+      try {
+        const data = await adminGetUsers();
+        setUsers(data);
+      } catch {
+        setError("Не удалось загрузить пользователей.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadUsers();
   }, []);
 
   if (loading) return <CircularProgress />;
@@ -99,16 +115,30 @@ const UsersTab = () => {
   );
 };
 
+interface Plan {
+  id: number;
+  plan_name: string;
+  year: number;
+  created_at: string;
+}
+
 const PlansTab = () => {
-  const [plans, setPlans] = useState<any[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    adminGetPlans()
-      .then(setPlans)
-      .catch(() => setError("Не удалось загрузить планы."))
-      .finally(() => setLoading(false));
+    const loadPlans = async () => {
+      try {
+        const data = await adminGetPlans();
+        setPlans(data);
+      } catch {
+        setError("Не удалось загрузить планы.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadPlans();
   }, []);
 
   if (loading) return <CircularProgress />;
@@ -143,7 +173,6 @@ const PlansTab = () => {
 const AnalyticsTab = () => {
   const [error, setError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('');
   const [message, setMessage] = useState<string>('');
 
   const isDownloading = useRef(false);
@@ -158,10 +187,10 @@ const AnalyticsTab = () => {
     try {
       const response = await adminAnalyzePsd(file);
       setTaskId(response.task_id);
-      setStatus('pending');
       setMessage(response.message);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Ошибка запуска анализа");
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
+      setError(errorMsg || "Ошибка запуска анализа");
     } finally {
       event.target.value = '';
     }
@@ -175,7 +204,6 @@ const AnalyticsTab = () => {
 
         try {
             const statusData = await getAdminTaskStatus(taskId);
-            setStatus(statusData.status);
             setMessage(statusData.message);
 
             if (statusData.status === 'completed') {
@@ -184,12 +212,11 @@ const AnalyticsTab = () => {
 
                 try {
                     await downloadAdminTaskResult(taskId);
-                } catch (e) {
-                    console.error("Download error:", e);
+                } catch (_e) {
+                    console.error("Download error:", _e);
                     setError("Ошибка скачивания файла");
                 } finally {
                     setTaskId(null);
-                    setStatus('');
                     setMessage('');
                     isDownloading.current = false;
                 }
@@ -198,8 +225,8 @@ const AnalyticsTab = () => {
                 setError(`Ошибка анализа: ${statusData.error}`);
                 setTaskId(null);
             }
-        } catch (e) {
-            console.error("Error polling task status", e);
+        } catch (_e) {
+            console.error("Error polling task status", _e);
             clearInterval(interval);
             setTaskId(null);
             setError("Ошибка связи с сервером");
@@ -242,8 +269,22 @@ const AnalyticsTab = () => {
   );
 };
 
+interface ExternalDoc {
+  id: number;
+  bank_name: string;
+  doc_type: string;
+  sender_last_name?: string;
+  sender_first_name?: string;
+  sender_email?: string;
+  sender_phone?: string;
+  received_at: string;
+  completed_at?: string;
+  status: string;
+  file_path: string;
+}
+
 const ExternalDocsTab = () => {
-    const [docs, setDocs] = useState<any[]>([]);
+    const [docs, setDocs] = useState<ExternalDoc[]>([]);
     const [loading, setLoading] = useState(true);
     const [uploadOpen, setUploadOpen] = useState(false);
     const [error, setError] = useState('');
@@ -262,13 +303,17 @@ const ExternalDocsTab = () => {
     const [senderPhone, setSenderPhone] = useState('');
     const [externalId, setExternalId] = useState('');
 
-    const loadDocs = () => {
+    const loadDocs = async () => {
         setLoading(true);
         setError('');
-        getExternalDocs()
-            .then(setDocs)
-            .catch(() => setError("Не удалось загрузить документы."))
-            .finally(() => setLoading(false));
+        try {
+            const data = await getExternalDocs();
+            setDocs(data);
+        } catch {
+            setError("Не удалось загрузить документы.");
+        } finally {
+            setLoading(false);
+        }
     };
 
     useEffect(() => {
@@ -285,7 +330,7 @@ const ExternalDocsTab = () => {
             setUploadOpen(false);
             loadDocs();
             resetForm();
-        } catch (e) {
+        } catch {
             alert("Ошибка загрузки");
         }
     };
@@ -308,7 +353,7 @@ const ExternalDocsTab = () => {
             try {
                 await sendExternalResponse(docId);
                 loadDocs();
-            } catch (e) {
+            } catch {
                 alert("Ошибка отправки ответа");
             }
         }
@@ -382,7 +427,7 @@ const ExternalDocsTab = () => {
                                     <TableCell align="right">
                                         <Stack direction="row" spacing={1} justifyContent="flex-end">
                                             <Tooltip title="Скачать файл">
-                                                <IconButton size="small" onClick={() => downloadExternalSource(doc.id, doc.file_path.split('/').pop())}>
+                                                <IconButton size="small" onClick={() => downloadExternalSource(doc.id, doc.file_path.split('/').pop() || 'document')}>
                                                     <DownloadIcon />
                                                 </IconButton>
                                             </Tooltip>
@@ -413,7 +458,7 @@ const ExternalDocsTab = () => {
                 <DialogTitle>Загрузка внешнего документа</DialogTitle>
                 <DialogContent>
                     <Grid container spacing={3} sx={{ mt: 0.5 }}>
-                        <Grid item xs={12} md={6}>
+                        <Grid size={{ xs: 12, md: 6 }}>
                             <Typography variant="subtitle2" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <DescriptionIcon color="primary" fontSize="small" /> Основная информация
                             </Typography>
@@ -429,7 +474,7 @@ const ExternalDocsTab = () => {
                             </Stack>
                         </Grid>
                         
-                        <Grid item xs={12} md={6}>
+                        <Grid size={{ xs: 12, md: 6 }}>
                             <Typography variant="subtitle2" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <ContactIcon color="primary" fontSize="small" /> Данные отправителя
                             </Typography>
@@ -442,7 +487,7 @@ const ExternalDocsTab = () => {
                             </Stack>
                         </Grid>
                         
-                        <Grid item xs={12}>
+                        <Grid size={{ xs: 12 }}>
                             <Divider sx={{ my: 1 }} />
                             <Box sx={{ mt: 1 }}>
                                 <Button variant="outlined" component="label" fullWidth sx={{ borderStyle: 'dashed', py: 2 }}>
@@ -479,7 +524,23 @@ const EstimateTemplateTab = () => {
     const [uploading, setUploading] = useState(false);
     const [uploadMessage, setUploadMessage] = useState('');
     const [uploadError, setUploadError] = useState('');
-    const [analysisData, setAnalysisData] = useState<any>(null);
+    interface AnalysisSummary {
+        totalAmount: string;
+        itemCount: number;
+        localContentPercentage: string;
+        uniqueCategories: number;
+    }
+    interface ChartData {
+        labels: string[];
+        datasets: { data: number[]; backgroundColor?: string[] }[];
+    }
+    interface AnalysisData {
+        summary: AnalysisSummary;
+        costItemAnalysis: { chartData: ChartData };
+        localContentAnalysis: { chartData: ChartData };
+        fundingSourceAnalysis: { chartData: ChartData };
+    }
+    const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
     const [analysisLoading, setAnalysisLoading] = useState(false);
     const [analysisError, setAnalysisError] = useState('');
 
@@ -502,8 +563,9 @@ const EstimateTemplateTab = () => {
             const response = await uploadEstimateTemplate(file);
             setUploadMessage(response.message);
             setFile(null);
-        } catch (e: any) {
-            setUploadError(e.response?.data?.detail || "Ошибка загрузки шаблона.");
+        } catch (e: unknown) {
+            const errorMsg = e instanceof Error ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
+            setUploadError(errorMsg || "Ошибка загрузки шаблона.");
         } finally {
             setUploading(false);
         }
@@ -516,8 +578,9 @@ const EstimateTemplateTab = () => {
         try {
             const data = await getEstimateAnalysis();
             setAnalysisData(data);
-        } catch (e: any) {
-            setAnalysisError(e.response?.data?.detail || "Ошибка получения данных для анализа.");
+        } catch (e: unknown) {
+            const errorMsg = e instanceof Error ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
+            setAnalysisError(errorMsg || "Ошибка получения данных для анализа.");
         } finally {
             setAnalysisLoading(false);
         }
@@ -551,22 +614,22 @@ const EstimateTemplateTab = () => {
             {analysisData && (
                 <Box>
                     <Grid container spacing={3} sx={{ mb: 3 }}>
-                        <Grid item xs={12} sm={6} md={3}>
+                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                             <SummaryCard title="Общая сумма" value={analysisData.summary.totalAmount} icon={<MonetizationOnIcon fontSize="large" />} />
                         </Grid>
-                        <Grid item xs={12} sm={6} md={3}>
+                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                             <SummaryCard title="Кол-во позиций" value={analysisData.summary.itemCount} icon={<ListAltIcon fontSize="large" />} />
                         </Grid>
-                        <Grid item xs={12} sm={6} md={3}>
+                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                             <SummaryCard title="Доля ВЦ" value={analysisData.summary.localContentPercentage} icon={<PieChartIcon fontSize="large" />} />
                         </Grid>
-                        <Grid item xs={12} sm={6} md={3}>
+                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                             <SummaryCard title="Статей затрат" value={analysisData.summary.uniqueCategories} icon={<CategoryIcon fontSize="large" />} />
                         </Grid>
                     </Grid>
 
                     <Grid container spacing={4}>
-                        <Grid item xs={12} md={6}>
+                        <Grid size={{ xs: 12, md: 6 }}>
                             <Paper elevation={3} sx={{ p: 2, height: '100%' }}>
                                 <Typography variant="h6" gutterBottom>Топ-10 Статей Затрат</Typography>
                                 <Box sx={{ height: 400 }}>
@@ -574,15 +637,15 @@ const EstimateTemplateTab = () => {
                                 </Box>
                             </Paper>
                         </Grid>
-                        <Grid item xs={12} md={6}>
+                        <Grid size={{ xs: 12, md: 6 }}>
                             <Grid container spacing={3}>
-                                <Grid item xs={12} sm={6}>
+                                <Grid size={{ xs: 12, sm: 6 }}>
                                     <Paper elevation={3} sx={{ p: 2 }}>
                                         <Typography variant="h6" align="center" gutterBottom>Доля ВЦ</Typography>
                                         <Pie data={analysisData.localContentAnalysis.chartData} />
                                     </Paper>
                                 </Grid>
-                                <Grid item xs={12} sm={6}>
+                                <Grid size={{ xs: 12, sm: 6 }}>
                                     <Paper elevation={3} sx={{ p: 2 }}>
                                         <Typography variant="h6" align="center" gutterBottom>Источники</Typography>
                                         <Pie data={analysisData.fundingSourceAnalysis.chartData} />
@@ -610,7 +673,7 @@ export default function AdminPage() {
         </Typography>
 
         <Paper sx={{ mb: 3 }}>
-          <Tabs value={tab} onChange={(e, v) => setTab(v)} centered>
+          <Tabs value={tab} onChange={(_event, v) => setTab(v)} centered>
             <Tab icon={<InboxIcon />} label="Входящие документы" />
             <Tab icon={<AnalyticsIcon />} label="Аналитика ПСД (Ручная)" />
             <Tab icon={<InsertChartIcon />} label="Анализ Сметы" />

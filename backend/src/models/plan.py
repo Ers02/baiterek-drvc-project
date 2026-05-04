@@ -96,7 +96,6 @@ class PlanItemVersion(Base):
     kato_delivery_id = Column(Integer, ForeignKey("kato.id"))
 
     additional_specs = Column(Text, nullable=True)
-    additional_specs_kz = Column(Text, nullable=True)
 
     quantity = Column(Numeric(12, 3), nullable=False)
     price_per_unit = Column(Numeric(18, 2), nullable=False)

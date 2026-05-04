@@ -1,5 +1,5 @@
 // src/pages/Login.tsx
-import { useState, FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import {
   Box,
   Paper,
@@ -55,7 +55,7 @@ export default function Login({ setToken }: LoginProps) {
       
       // Редирект в зависимости от роли
       try {
-        const decoded: any = jwtDecode(token);
+        const decoded: { role?: string; is_admin?: boolean } = jwtDecode(token);
         const role = decoded.role as UserRole;
         
         if (role === UserRole.ANALYST_DRVC || role === UserRole.DIRECTOR_DRVC) {
@@ -65,17 +65,17 @@ export default function Login({ setToken }: LoginProps) {
         } else {
           navigate('/');
         }
-      } catch (e) {
-        console.error("Redirect error:", e);
+      } catch {
         navigate('/');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Важно: берем ошибку из ответа бэкенда
-      const errorDetail = err.response?.data?.detail;
+      const errorDetail = err instanceof Error ? (err as { response?: { data?: { detail?: unknown } } }).response?.data?.detail : undefined;
       if (Array.isArray(errorDetail)) {
-          setError(errorDetail[0]?.msg || 'Ошибка валидации данных');
+          const firstError = errorDetail[0] as { msg?: string } | undefined;
+          setError(firstError?.msg || 'Ошибка валидации данных');
       } else {
-          setError(errorDetail || 'Неверный ИИН или пароль');
+          setError(typeof errorDetail === 'string' ? errorDetail : 'Неверный ИИН или пароль');
       }
     } finally {
       setLoading(false)

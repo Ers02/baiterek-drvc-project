@@ -8,7 +8,7 @@ import {
   Select, MenuItem, FormControl, InputLabel, OutlinedInput, ListItemText, Grid,
   TablePagination, Divider, LinearProgress, Tabs, Tab
 } from '@mui/material';
-import type { SelectChangeEvent } from '@mui/material';
+import type { SelectChangeEvent, ChipProps } from '@mui/material'; // Import ChipProps
 import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
   LockOpen as LockOpenIcon, CheckCircle as CheckCircleIcon, Download as DownloadIcon,
@@ -26,6 +26,48 @@ import {
   PlanStatus, importKenmlTemplate, compareVersions
 } from '../services/api';
 import type { ProcurementPlan, ProcurementPlanVersion, PlanItemVersion } from '../services/api';
+
+// Define types for compare result
+interface ChangeDetail {
+  field: string;
+  old: string | number;
+  new: string | number;
+}
+
+interface ChangedItem {
+  item_id: number;
+  item_number: number;
+  trucode: string;
+  name: string;
+  changes: ChangeDetail[];
+}
+
+interface AddedItem {
+  id: number;
+  item_number: number;
+  trucode: string;
+  name: string;
+  amount: number;
+}
+
+interface RemovedItem {
+  id: number;
+  item_number: number;
+  trucode: string;
+  name: string;
+  amount: number;
+}
+
+interface CompareResult {
+  version1: number;
+  version2: number;
+  changed_count: number;
+  added_count: number;
+  removed_count: number;
+  changed_items: ChangedItem[];
+  added_items: AddedItem[];
+  removed_items: RemovedItem[];
+}
 
 const currencyFormatter = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 2 });
 const formatCurrency = (amount: number) => currencyFormatter.format(amount);
@@ -85,7 +127,7 @@ const DetailedStatsCard = ({
             )}
 
             {showExecuted && (
-                <Box sx={{ mt: 0.5, pl: item.icon ? 4 : 0, borderLeft: `2px solid ${color}`, pl: 1, ml: 0.5 }}>
+                <Box sx={{ mt: 0.5, pl: 1, borderLeft: `2px solid ${color}`, ml: 0.5 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="caption" color="text.secondary">Факт:</Typography>
                         <Typography variant="caption" fontWeight="bold" color="success.main">
@@ -112,6 +154,7 @@ const DetailedStatsCard = ({
 const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) => {
   const { t } = useTranslation();
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const stats = useMemo(() => {
     const result = {
       goods: { total: 0, vc: 0, executedTotal: 0, executedVc: 0 },
@@ -134,7 +177,7 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
         result.goods.executedTotal += executedTotal;
         result.goods.executedVc += executedVc;
       } else if (item.need_type === 'Работа') {
-        result.works.total += total;
+        result.works.total += total; 
         result.works.vc += vc;
         result.works.executedTotal += executedTotal;
         result.works.executedVc += executedVc;
@@ -202,13 +245,15 @@ const StatusChip = ({ status, isExecuted }: { status: PlanStatus, isExecuted: bo
       return <Chip label={t('status_EXECUTED')} color="success" variant="outlined" sx={{ fontWeight: 'bold' }} icon={<CheckCircleIcon />} />;
   }
 
-  const statusMap = {
+  type AllowedChipColor = ChipProps['color']; // Define the expected type for Chip color
+
+  const statusMap: Record<PlanStatus, { label: string; color: AllowedChipColor }> = {
     [PlanStatus.DRAFT]: { label: t('status_DRAFT'), color: 'info' },
     [PlanStatus.PRE_APPROVED]: { label: t('status_PRE_APPROVED'), color: 'warning' },
     [PlanStatus.APPROVED]: { label: t('status_APPROVED'), color: 'primary' },
   };
   const { label, color } = statusMap[status] || statusMap.DRAFT;
-  return <Chip label={label} color={color as any} variant="outlined" sx={{ fontWeight: 'bold' }} />;
+  return <Chip label={label} color={color} variant="outlined" sx={{ fontWeight: 'bold' }} />;
 };
 
 const formatItemNumber = (item: PlanItemVersion) => {
@@ -227,6 +272,8 @@ const formatItemNumber = (item: PlanItemVersion) => {
     return number;
 };
 
+type TFunctionType = ReturnType<typeof useTranslation>['t'];
+
 const PlanItemRow = React.memo(({ 
     item, 
     activeVersionId, 
@@ -243,7 +290,7 @@ const PlanItemRow = React.memo(({
     activeVersionId: number;
     isEditable: boolean;
     isApproved: boolean;
-    t: (key: string) => string;
+    t: TFunctionType;
     lang: 'ru' | 'kk';
     onEdit: (id: number) => void;
     onDelete: (id: number) => void;
@@ -395,7 +442,7 @@ export default function PlanForm() {
   const [rowsPerPage, setRowsPerPage] = useState(50);
 
   const [isCompareModalOpen, setCompareModalOpen] = useState(false);
-  const [compareResult, setCompareResult] = useState<any>(null);
+  const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareTab, setCompareTab] = useState(0);
 
@@ -407,7 +454,7 @@ export default function PlanForm() {
       const activeVer = data.versions.find(v => v.is_active);
       setPlan(data);
       setActiveVersion(activeVer || null);
-    } catch (err) {
+    } catch {
       setError(t('error_loading_plan'));
     } finally {
       setLoading(false);
@@ -423,8 +470,9 @@ export default function PlanForm() {
     try {
       await updateVersionStatus(Number(planId), nextStatus);
       await loadPlan();
-    } catch (err: any) {
-      setError(`Ошибка: ${err.response?.data?.detail || err.message}`);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail || err.message : 'Ошибка';
+      setError(`Ошибка: ${errorMsg}`);
     } finally {
       setConfirmOpen(false);
       setNextStatus(null);
@@ -445,28 +493,30 @@ export default function PlanForm() {
     if (window.confirm(t('confirm_create_version'))) {
       setLoading(true);
       try {
-        const newVersion = await createVersion(Number(planId));
+        await createVersion(Number(planId));
         await loadPlan();
-      } catch (err: any) {
-        setError(err.response?.data?.detail || t('error_creating_version'));
+      } catch (err: unknown) {
+        const errorDetail = err instanceof Error ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
+        setError(errorDetail || t('error_creating_version'));
       } finally {
         setLoading(false);
       }
     }
   };
   
-  const handleKenmlImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files || event.target.files.length === 0) return;
+  const handleKenmlImport = async (_: React.ChangeEvent<HTMLInputElement>) => { // Changed _event to _
+    if (!_.target.files || _.target.files.length === 0) return;
     
-    const file = event.target.files[0];
+    const file = _.target.files[0];
     setLoading(true);
     try {
       await importKenmlTemplate(file);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || t('error_importing_kenml') || "Ошибка импорта KENML");
+    } catch (err: unknown) {
+      const errorDetail = err instanceof Error ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
+      setError(errorDetail || t('error_importing_kenml'));
     } finally {
       setLoading(false);
-      event.target.value = '';
+      _.target.value = '';
     }
   };
 
@@ -486,9 +536,9 @@ export default function PlanForm() {
       try {
         await revertItem(itemId);
         loadPlan();
-      } catch (err: any) {
-        const message = err.response?.data?.detail || t('error_reverting_item');
-        setError(message);
+      } catch (err: unknown) {
+        const errorDetail = err instanceof Error ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
+        setError(errorDetail || t('error_reverting_item'));
       }
     }
   }, [t, loadPlan]);
@@ -523,7 +573,7 @@ export default function PlanForm() {
     setPage(0);
   };
 
-  const handleChangePage = (event: unknown, newPage: number) => {
+  const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
@@ -550,8 +600,7 @@ export default function PlanForm() {
     try {
         const result = await compareVersions(Number(planId), prevVersion.id, activeVersion.id);
         setCompareResult(result);
-    } catch (err) {
-        console.error(err);
+    } catch {
         setCompareResult(null);
     } finally {
         setCompareLoading(false);
@@ -582,9 +631,8 @@ export default function PlanForm() {
         (item.agsk?.code?.toLowerCase().includes(searchAgskLower));
 
       const searchSpecsLower = searchSpecs.toLowerCase();
-      const matchesSpecs = !searchSpecs || 
-        (item.additional_specs?.toLowerCase().includes(searchSpecsLower)) ||
-        (item.additional_specs_kz?.toLowerCase().includes(searchSpecsLower));
+      const matchesSpecs = !searchSpecs ||
+        (item.additional_specs?.toLowerCase().includes(searchSpecsLower));
 
       return matchesKtp && matchesType && matchesEnstru && matchesName && matchesAgsk && matchesSpecs;
     });
@@ -720,8 +768,8 @@ export default function PlanForm() {
           
           <Paper sx={{ p: 2, mb: 3 }}>
             <Grid container spacing={2} alignItems="center">
-                <Grid item xs={12} sm={6} md={2}>
-                    <TextField 
+                <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+                    <TextField
                         label={t('enstru_code') || 'Код ЕНС ТРУ'}
                         variant="outlined"
                         size="small"
@@ -730,8 +778,8 @@ export default function PlanForm() {
                         onChange={(e) => { setSearchEnstru(e.target.value); setPage(0); }}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                    <TextField 
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                    <TextField
                         label={t('item_name') || 'Наименование'}
                         variant="outlined"
                         size="small"
@@ -740,8 +788,8 @@ export default function PlanForm() {
                         onChange={(e) => { setSearchName(e.target.value); setPage(0); }}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={2}>
-                    <TextField 
+                <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+                    <TextField
                         label={t('agsk_code') || 'Код АГСК'}
                         variant="outlined"
                         size="small"
@@ -750,8 +798,8 @@ export default function PlanForm() {
                         onChange={(e) => { setSearchAgsk(e.target.value); setPage(0); }}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={2}>
-                    <TextField 
+                <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+                    <TextField
                         label={t('specs_search_label') || 'Характеристика'}
                         variant="outlined"
                         size="small"
@@ -760,7 +808,7 @@ export default function PlanForm() {
                         onChange={(e) => { setSearchSpecs(e.target.value); setPage(0); }}
                     />
                 </Grid>
-                <Grid item xs={12} sm={6} md={3}>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                     <FormControl size="small" fullWidth>
                         <InputLabel>{t('need_type') || 'Тип закупки'}</InputLabel>
                         <Select
@@ -779,7 +827,7 @@ export default function PlanForm() {
                         </Select>
                     </FormControl>
                 </Grid>
-                <Grid item xs={12}>
+                <Grid size={{ xs: 12 }}>
                     <FormControlLabel
                         control={<Checkbox checked={showKtpOnly} onChange={(e) => { setShowKtpOnly(e.target.checked); setPage(0); }} />}
                         label={t('show_ktp_only') || 'Только КТП'}
@@ -885,7 +933,7 @@ export default function PlanForm() {
                         Сравнение версии {compareResult.version1} и {compareResult.version2}
                     </Typography>
                     
-                    <Tabs value={compareTab} onChange={(e, val) => setCompareTab(val)} sx={{ mb: 2 }}>
+                    <Tabs value={compareTab} onChange={(_, val) => setCompareTab(val)} sx={{ mb: 2 }}>
                         <Tab label={`Изменено (${compareResult.changed_count})`} />
                         <Tab label={`Добавлено (${compareResult.added_count})`} />
                         <Tab label={`Удалено (${compareResult.removed_count})`} />
@@ -904,13 +952,13 @@ export default function PlanForm() {
                                 </TableHead>
                                 <TableBody>
                                     {compareResult.changed_items.length > 0 ? (
-                                        compareResult.changed_items.map((item: any) => (
+                                        compareResult.changed_items.map((item: ChangedItem) => (
                                             <TableRow key={item.item_id}>
                                                 <TableCell>{item.item_number}</TableCell>
                                                 <TableCell>{item.trucode}</TableCell>
                                                 <TableCell>{item.name}</TableCell>
                                                 <TableCell>
-                                                    {item.changes.map((change: any, idx: number) => (
+                                                    {item.changes.map((change: ChangeDetail, idx: number) => (
                                                         <Typography key={idx} variant="body2" sx={{ fontSize: '0.8rem' }}>
                                                             {getFieldLabel(change.field)}: {change.old} &rarr; <b>{change.new}</b>
                                                         </Typography>
@@ -939,7 +987,7 @@ export default function PlanForm() {
                                 </TableHead>
                                 <TableBody>
                                     {compareResult.added_items.length > 0 ? (
-                                        compareResult.added_items.map((item: any) => (
+                                        compareResult.added_items.map((item: AddedItem) => (
                                             <TableRow key={item.id}>
                                                 <TableCell>{item.item_number}</TableCell>
                                                 <TableCell>{item.trucode}</TableCell>
@@ -968,7 +1016,7 @@ export default function PlanForm() {
                                 </TableHead>
                                 <TableBody>
                                     {compareResult.removed_items.length > 0 ? (
-                                        compareResult.removed_items.map((item: any) => (
+                                        compareResult.removed_items.map((item: RemovedItem) => (
                                             <TableRow key={item.id}>
                                                 <TableCell>{item.item_number}</TableCell>
                                                 <TableCell>{item.trucode}</TableCell>

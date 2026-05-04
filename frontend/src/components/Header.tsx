@@ -1,10 +1,9 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { AppBar, Toolbar, Typography, Box, Select, MenuItem, FormControl, IconButton, Tooltip, Dialog, DialogTitle, DialogContent, Button } from '@mui/material'
 import { useTranslation } from '../i18n'
 import { useNavigate, useLocation } from 'react-router-dom'
 import LogoutIcon from '@mui/icons-material/Logout';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
-import SearchIcon from '@mui/icons-material/Search';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import { jwtDecode } from 'jwt-decode';
@@ -20,10 +19,10 @@ export default function Header() {
   let isDirector = false;
   if (token) {
     try {
-      const decoded: any = jwtDecode(token);
+      const decoded: { is_admin?: boolean; role?: string; is_director?: boolean } = jwtDecode(token);
       isAdminOrAnalyst = decoded.is_admin === true || decoded.role === 'analyst_drvc';
       isDirector = decoded.role === 'director_drvc' || decoded.is_director === true;
-    } catch (e) {}
+    } catch { /* ignore */ }
   }
   const showAnalystMenu = isAdminOrAnalyst || isDirector;
 
@@ -106,7 +105,7 @@ export default function Header() {
             </Select>
           </FormControl>
 
-          <Tooltip title={t('logout') || "Выйти"}>
+          <Tooltip title={t('logout')}>
             <IconButton color="inherit" onClick={handleLogout} sx={{ bgcolor: 'rgba(255,255,255,0.1)', ml: 1 }}>
               <LogoutIcon />
             </IconButton>
@@ -118,7 +117,7 @@ export default function Header() {
         <DialogTitle>{t('video_instruction_title') || "Видеоинструкция"}</DialogTitle>
         <DialogContent>
           <video controls width="100%" src="/Видеоинструкция.mp4">
-            {t('video_not_supported') || "Ваш браузер не поддерживает видео."}
+            {t('video_not_supported')}
           </video>
         </DialogContent>
       </Dialog>

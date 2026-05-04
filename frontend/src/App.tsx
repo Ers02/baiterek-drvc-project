@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -10,35 +11,35 @@ import PsdAnalystPage from './pages/PsdAnalystPage';
 import KtpSearchPage from './pages/KtpSearchPage';
 
 // Приватный роут для защиты страниц
-const PrivateRoute = ({ children }: { children: JSX.Element }) => {
+const PrivateRoute = ({ children }: { children: ReactNode }) => {
   const isAuthenticated = !!localStorage.getItem('token');
-  return isAuthenticated ? children : <Navigate to="/login" />;
+  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
 };
 
 // Роут для админа и аналитика ДРВЦ
-const AdminRoute = ({ children }: { children: JSX.Element }) => {
-  const token = localStorage.getItem('token');
+const AdminRoute = ({ children }: { children: ReactNode }) => {
+  const lsToken = localStorage.getItem('token');
   let hasAdminAccess = false;
-  if (token) {
+  if (lsToken) {
       try {
-          const decoded: any = jwtDecode(token);
+          const decoded: { is_admin?: boolean; role?: string } = jwtDecode(lsToken);
           // Админ, директор или аналитик ДРВЦ имеют доступ к админке
           hasAdminAccess = decoded.is_admin === true || decoded.role === 'analyst_drvc' || decoded.role === 'director_drvc';
-      } catch (e) {}
+      } catch { /* ignore */ }
   }
 
-  return hasAdminAccess ? children : <Navigate to="/" />;
+  return hasAdminAccess ? <>{children}</> : <Navigate to="/" />;
 };
 
 // Роут для главной страницы с редиректом аналитика ДРВЦ на страницу ПСД
-const HomeRoute = ({ children }: { children: JSX.Element }) => {
-  const token = localStorage.getItem('token');
+const HomeRoute = ({ children }: { children: ReactNode }) => {
+  const lsToken = localStorage.getItem('token');
   let isAnalyst = false;
-  if (token) {
+  if (lsToken) {
       try {
-          const decoded: any = jwtDecode(token);
+          const decoded: { role?: string } = jwtDecode(lsToken);
           isAnalyst = decoded.role === 'analyst_drvc' || decoded.role === 'director_drvc';
-      } catch (e) {}
+      } catch { /* ignore */ }
   }
 
   // Аналитик или директор ДРВЦ редиректится на /psd-analyst
@@ -46,11 +47,12 @@ const HomeRoute = ({ children }: { children: JSX.Element }) => {
       return <Navigate to="/psd-analyst" />;
   }
 
-  return children;
+  return <>{children}</>;
 };
 
 function App() {
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_token, setToken] = useState(localStorage.getItem('token'));
 
   useEffect(() => {
     const handleStorageChange = () => {
