@@ -24,16 +24,16 @@ app.add_middleware(
 
 # Подключение роутеров
 api_router = FastAPI()
-api_router.include_router(auth.router)
-api_router.include_router(plans.router)
-api_router.include_router(items.router)
-api_router.include_router(lookups.router)
-api_router.include_router(kato_router.router, prefix="/kato", tags=["kato"])
-api_router.include_router(execution_router.router)
-api_router.include_router(admin.router) # Подключаем админку
-api_router.include_router(psd_analyst.router) # Подключаем аналитика ПСД
+api_router.include_router(auth.router,include_in_schema=False)
+api_router.include_router(plans.router,include_in_schema=False)
+api_router.include_router(items.router,include_in_schema=False)
+api_router.include_router(lookups.router,include_in_schema=False)
+api_router.include_router(kato_router.router, prefix="/kato", tags=["kato"],include_in_schema=False)
+api_router.include_router(execution_router.router,include_in_schema=False)
+api_router.include_router(admin.router,include_in_schema=False) # Подключаем админку
+api_router.include_router(psd_analyst.router,include_in_schema=False) # Подключаем аналитика ПСД
 api_router.include_router(external.router) # API для дочерних организаций
-api_router.include_router(product_groups.router) # Библиотека групп/товаров
+api_router.include_router(product_groups.router,include_in_schema=False) # Библиотека групп/товаров
 
 app.mount("/api", api_router)
 
