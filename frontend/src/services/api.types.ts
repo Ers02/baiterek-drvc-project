@@ -10,14 +10,25 @@ export interface Oked { id: number; code: string | null; name_ru: string | null;
 export interface Kpved { id: number; code: string | null; name_ru: string | null; name_kz: string | null; parent_identificator: string | null; }
 export interface Tnved { id: number; code: string | null; tree_name: string | null; name: string | null; parent_id: number | null; is_last: boolean | null; }
 
-// Результат поиска КТП (оптимизированный - только нужные поля)
+// Результат поиска КТП
 export interface KtpSearchResult {
     id: number;
-    product_code: string | null;  // Код продукта для связи
+    product_code: string | null;
     product_name: string | null;
     company_name: string | null;
     bin_iin: string | null;
-    dvc_percent: string | null;  // Процент ВЦ
+    dvc_percent: string | null;
+    oked_codes?: string[] | null;
+    oked_names?: string[] | null;
+    kpved_codes?: string[] | null;
+    kpved_names?: string[] | null;
+    tnved_codes?: string[] | null;
+    enstru_codes?: string[] | null;
+    enstru_names?: string[] | null;
+    agsk3_codes?: string[] | null;
+    agsk3_names?: string[] | null;
+    production_address?: string | null;
+    region_kato?: string | null;
 }
 
 // Обновленный интерфейс Enstru
@@ -37,6 +48,7 @@ export const UserRole = {
   ADMIN: "admin",
   DIRECTOR_DRVC: "director_drvc",
   ANALYST_DRVC: "analyst_drvc",
+  ANALYST_MANAGER: "analyst_manager",
   USER: "user",
 } as const;
 export type UserRole = typeof UserRole[keyof typeof UserRole];
@@ -152,7 +164,7 @@ export interface PlanItemPayload {
   unit_id?: number;
   expense_item_id: number;
   funding_source_id: number;
-  agsk_id?: string;
+  agsk_code?: string;
   kato_purchase_id?: number;
   kato_delivery_id?: number;
   additional_specs?: string;
@@ -242,6 +254,36 @@ export interface ExternalDocument {
   assigned_at?: string;       // ISO date string
   is_test: boolean;
   assigned_user_name?: string; // Добавлено для удобства отображения на фронтенде
+}
+
+// --- Типы для новой системы ручных сопоставлений ---
+export interface ManualMatchStatus {
+    id: number;
+    enstru_code: string;
+    status: 'pending' | 'approved' | 'rejected';
+    matched_at?: string;
+    approved_at?: string;
+}
+
+/** Обратная совместимость — первый элемент массива current_manual_matches */
+export type ManualMatchStatusLegacy = ManualMatchStatus | null;
+
+export interface AgskEnstruMatchItem {
+    id: number;
+    agsk_code: string;
+    enstru_code: string;
+    doc_id?: number | null;
+    item_id?: number | null;
+    item_name?: string | null;
+    matched_by: number;
+    analyst_name?: string;
+    matched_at?: string;
+    is_approved: boolean;
+    is_active: boolean;
+    approved_by?: number | null;
+    approved_by_name?: string | null;
+    approved_at?: string | null;
+    status: 'pending' | 'approved' | 'rejected';
 }
 
 // --- Payload для новых API запросов ---

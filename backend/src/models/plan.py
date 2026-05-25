@@ -23,7 +23,7 @@ class ProcurementPlan(Base):
     id = Column(Integer, primary_key=True)
     plan_name = Column(String(500), nullable=False)
     year = Column(SmallInteger, nullable=False)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     creator = relationship("User", back_populates="plans")
@@ -38,7 +38,7 @@ class ProcurementPlanVersion(Base):
     __tablename__ = "procurement_plan_versions"
 
     id = Column(Integer, primary_key=True)
-    plan_id = Column(Integer, ForeignKey("procurement_plans.id", ondelete="CASCADE"))
+    plan_id = Column(Integer, ForeignKey("procurement_plans.id", ondelete="CASCADE"), nullable=False)
     version_number = Column(Integer, nullable=False)
 
     status = Column(Enum(PlanStatus), nullable=False)
@@ -55,7 +55,7 @@ class ProcurementPlanVersion(Base):
     is_active = Column(Boolean, default=True)
     is_executed = Column(Boolean, default=False, nullable=False)
 
-    created_by = Column(Integer, ForeignKey("users.id"))
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     plan = relationship("ProcurementPlan", back_populates="versions")
@@ -86,14 +86,14 @@ class PlanItemVersion(Base):
     item_number = Column(Integer, nullable=False)
     need_type = Column(Enum(NeedType), nullable=False)
 
-    trucode = Column(String(35), ForeignKey("enstru.code"), nullable=False)
-    unit_id = Column(Integer, ForeignKey("mkei.id"))
-    expense_item_id = Column(Integer, ForeignKey("cost_items.id"), nullable=False)
-    funding_source_id = Column(Integer, ForeignKey("source_funding.id"), nullable=False)
+    trucode = Column(String(35), nullable=False)
+    unit_id = Column(Integer, ForeignKey("mkei.id", ondelete="SET NULL"))
+    expense_item_id = Column(Integer, ForeignKey("cost_items.id", ondelete="RESTRICT"), nullable=False)
+    funding_source_id = Column(Integer, ForeignKey("source_funding.id", ondelete="RESTRICT"), nullable=False)
 
-    agsk_id = Column(String(50), ForeignKey("agsk.code"))
-    kato_purchase_id = Column(Integer, ForeignKey("kato.id"))
-    kato_delivery_id = Column(Integer, ForeignKey("kato.id"))
+    agsk_code = Column(String(50))
+    kato_purchase_id = Column(Integer, ForeignKey("kato.id", ondelete="SET NULL"))
+    kato_delivery_id = Column(Integer, ForeignKey("kato.id", ondelete="SET NULL"))
 
     additional_specs = Column(Text, nullable=True)
 
@@ -109,8 +109,8 @@ class PlanItemVersion(Base):
 
     is_deleted = Column(Boolean, default=False, nullable=False)
 
-    root_item_id = Column(Integer, ForeignKey("plan_item_versions.id"), index=True, nullable=True)
-    source_version_id = Column(Integer, ForeignKey("procurement_plan_versions.id"), nullable=True)
+    root_item_id = Column(Integer, ForeignKey("plan_item_versions.id", ondelete="SET NULL"), index=True, nullable=True)
+    source_version_id = Column(Integer, ForeignKey("procurement_plan_versions.id", ondelete="SET NULL"), nullable=True)
 
     revision_number = Column(Integer, default=0, nullable=False)
 
@@ -133,11 +133,19 @@ class PlanItemVersion(Base):
 
     root_item = relationship("PlanItemVersion", remote_side=[id], foreign_keys=[root_item_id], post_update=True)
 
-    enstru = relationship("Enstru")
+    enstru = relationship(
+        "Enstru",
+        primaryjoin="foreign(PlanItemVersion.trucode) == Enstru.code",
+        viewonly=True
+    )
     unit = relationship("Mkei")
     expense_item = relationship("Cost_Item")
     funding_source = relationship("Source_Funding")
-    agsk = relationship("Agsk")
+    agsk = relationship(
+        "Agsk",
+        primaryjoin="foreign(PlanItemVersion.agsk_code) == Agsk.code",
+        viewonly=True
+    )
     kato_purchase = relationship("Kato", foreign_keys=[kato_purchase_id])
     kato_delivery = relationship("Kato", foreign_keys=[kato_delivery_id])
 

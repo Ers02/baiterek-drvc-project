@@ -1,15 +1,6 @@
-import faiss
-import numpy as np
-import json
-import re
-import os
-from rapidfuzz import fuzz
-from sentence_transformers import SentenceTransformer
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from ...models import models
-from ...core.logger import logger
-from ...core.config import settings
 
 class Matcher:
     def __init__(self, db: Session):

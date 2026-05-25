@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import {
   Box, Typography, Button, Paper, Chip, IconButton, TextField,
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -10,7 +11,7 @@ import {
   Search as SearchIcon, Inventory as InventoryIcon,
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
   LibraryBooks as LibraryBooksIcon, Close as CloseIcon,
-  Save as SaveIcon
+  Save as SaveIcon, Business as BusinessIcon
 } from '@mui/icons-material';
 import Header from '../components/Header';
 import {
@@ -21,6 +22,13 @@ import type {
   Oked, Kpved, Tnved, Enstru, Agsk, KtpSearchResult,
   ProductGroup, ProductGroupListItem, ProductGroupCreate
 } from '../services/api.types';
+
+const getDvcColor = (dvc: string | null): 'success' | 'warning' | 'error' => {
+  const val = parseFloat(dvc || '0');
+  if (val >= 70) return 'success';
+  if (val >= 40) return 'warning';
+  return 'error';
+};
 
 // Тип для редактируемой группы
 interface EditableGroup extends ProductGroup {
@@ -60,34 +68,42 @@ const LookupModal: React.FC<{
   getOptionLabel: (item: any) => string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   extractCode: (item: any) => string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  renderOption?: (item: any, isSelected: boolean) => ReactNode;
 }> = ({
-  open, onClose, title, searchPlaceholder, fetchData, selectedItems, onSelect, getOptionLabel, extractCode
+  open, onClose, title, searchPlaceholder, fetchData, selectedItems, onSelect, getOptionLabel, extractCode, renderOption
 }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [options, setOptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [tempSelected, setTempSelected] = useState<string[]>([]);
+  const reqId = useRef(0);
 
   useEffect(() => {
     if (open) {
       setTempSelected(selectedItems);
-      loadOptions();
+    } else {
+      setSearch('');
+      setOptions([]);
     }
   }, [open, selectedItems]);
 
   useEffect(() => {
+    if (!open) return;
     const timer = setTimeout(() => {
       loadOptions(search);
-    }, 300);
+    }, search ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, open]);
 
   const loadOptions = async (q?: string) => {
+    const id = ++reqId.current;
     setLoading(true);
+    setOptions([]);
     try {
       const data = await fetchData(q);
-      // Фильтруем опции с пустыми кодами
+      if (id !== reqId.current) return;
       const validOptions = data.filter(item => {
         const code = extractCode(item);
         return code && code.trim() !== '';
@@ -96,7 +112,7 @@ const LookupModal: React.FC<{
     } catch {
       // ignore
     } finally {
-      setLoading(false);
+      if (id === reqId.current) setLoading(false);
     }
   };
 
@@ -156,7 +172,6 @@ const LookupModal: React.FC<{
           {options.map((option) => {
             const code = extractCode(option);
             const isSelected = tempSelected.includes(code);
-            // Используем id как fallback для key если код пустой
             const uniqueKey = code || option.id?.toString() || Math.random().toString();
             return (
               <Box
@@ -167,17 +182,19 @@ const LookupModal: React.FC<{
                   cursor: 'pointer',
                   borderBottom: '1px solid #eee',
                   bgcolor: isSelected ? '#e3f2fd' : 'white',
-                  '&:hover': { bgcolor: isSelected ? '#e3f2fd' : '#f5f5f5' },
+                  '&:hover': { bgcolor: isSelected ? '#bbdefb' : '#f5f5f5' },
                   display: 'flex',
-                  alignItems: 'center',
+                  alignItems: 'flex-start',
                   gap: 1.5,
                 }}
               >
-                <Checkbox checked={isSelected} size="small" />
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2" sx={{ fontWeight: isSelected ? 600 : 400 }}>
-                    {getOptionLabel(option)}
-                  </Typography>
+                <Checkbox checked={isSelected} size="small" sx={{ mt: renderOption ? 0.5 : 0, flexShrink: 0 }} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  {renderOption ? renderOption(option, isSelected) : (
+                    <Typography variant="body2" sx={{ fontWeight: isSelected ? 600 : 400 }}>
+                      {getOptionLabel(option)}
+                    </Typography>
+                  )}
                 </Box>
               </Box>
             );
@@ -443,10 +460,108 @@ const KtpSearchPage: React.FC = () => {
             if (item.dvc_percent) parts.push(`[${item.dvc_percent}%]`);
             return parts.join(' - ') || 'Без названия';
           },
-          extractCode: (item: KtpSearchResult) => item.product_code || ''
+          extractCode: (item: KtpSearchResult) => item.product_code || '',
+          renderOption: (item: KtpSearchResult) => (
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75, flexWrap: 'wrap' }}>
+                {item.dvc_percent && (
+                  <Chip
+                    label={`${item.dvc_percent}% ДВС`}
+                    size="small"
+                    color={getDvcColor(item.dvc_percent)}
+                    variant={parseFloat(item.dvc_percent || '0') === 100 ? 'filled' : 'outlined'}
+                    sx={{ height: 22, fontSize: '0.7rem', fontWeight: 'bold', flexShrink: 0 }}
+                  />
+                )}
+                {item.product_code && (
+                  <Typography sx={{ fontSize: '0.65rem', color: '#78909c', fontFamily: 'monospace' }}>
+                    {item.product_code}
+                  </Typography>
+                )}
+              </Box>
+
+              {item.product_name && (
+                <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#1e293b', mb: 0.5, lineHeight: 1.3, wordBreak: 'break-word' }}>
+                  {item.product_name}
+                </Typography>
+              )}
+
+              {item.company_name && (
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75, mb: 0.5 }}>
+                  <BusinessIcon sx={{ fontSize: 13, color: '#64748b', mt: 0.2, flexShrink: 0 }} />
+                  <Typography sx={{ fontSize: '0.72rem', color: '#334155', lineHeight: 1.4, wordBreak: 'break-word' }}>
+                    {item.company_name}
+                  </Typography>
+                </Box>
+              )}
+
+              {(item.enstru_codes?.length || item.agsk3_codes?.length || item.oked_codes?.length || item.kpved_codes?.length || item.tnved_codes?.length) && (
+                <Box sx={{ mt: 0.75, pt: 0.75, borderTop: '1px solid #f0f0f0' }}>
+                  {item.enstru_codes?.length ? (
+                    <Typography sx={{ fontSize: '0.65rem', color: '#546e7a', lineHeight: 1.5, mb: 0.25 }}>
+                      <Box component="span" sx={{ fontWeight: 'bold', color: '#78909c', textTransform: 'uppercase', letterSpacing: 0.3 }}>ЕНСТРУ: </Box>
+                      {item.enstru_codes.map((code, i) => (
+                        <span key={code}>
+                          <Box component="span" sx={{ fontWeight: 'bold' }}>{code}</Box>
+                          {item.enstru_names?.[i] ? ` — ${item.enstru_names[i]}` : ''}
+                          {i < (item.enstru_codes?.length ?? 0) - 1 ? '; ' : ''}
+                        </span>
+                      ))}
+                    </Typography>
+                  ) : null}
+
+                  {item.agsk3_codes?.length ? (
+                    <Typography sx={{ fontSize: '0.65rem', color: '#546e7a', lineHeight: 1.5, mb: 0.25 }}>
+                      <Box component="span" sx={{ fontWeight: 'bold', color: '#78909c', textTransform: 'uppercase', letterSpacing: 0.3 }}>АГСК-3: </Box>
+                      {item.agsk3_codes.map((code, i) => (
+                        <span key={code}>
+                          <Box component="span" sx={{ fontWeight: 'bold' }}>{code}</Box>
+                          {item.agsk3_names?.[i] ? ` — ${item.agsk3_names[i]}` : ''}
+                          {i < (item.agsk3_codes?.length ?? 0) - 1 ? '; ' : ''}
+                        </span>
+                      ))}
+                    </Typography>
+                  ) : null}
+
+                  {item.oked_codes?.length ? (
+                    <Typography sx={{ fontSize: '0.65rem', color: '#546e7a', lineHeight: 1.5, mb: 0.25 }}>
+                      <Box component="span" sx={{ fontWeight: 'bold', color: '#78909c', textTransform: 'uppercase', letterSpacing: 0.3 }}>ОКЭД: </Box>
+                      {item.oked_codes.map((code, i) => (
+                        <span key={code}>
+                          <Box component="span" sx={{ fontWeight: 'bold' }}>{code}</Box>
+                          {item.oked_names?.[i] ? ` — ${item.oked_names[i]}` : ''}
+                          {i < (item.oked_codes?.length ?? 0) - 1 ? '; ' : ''}
+                        </span>
+                      ))}
+                    </Typography>
+                  ) : null}
+
+                  {item.kpved_codes?.length ? (
+                    <Typography sx={{ fontSize: '0.65rem', color: '#546e7a', lineHeight: 1.5, mb: 0.25 }}>
+                      <Box component="span" sx={{ fontWeight: 'bold', color: '#78909c', textTransform: 'uppercase', letterSpacing: 0.3 }}>КПВЭД: </Box>
+                      {item.kpved_codes.map((code, i) => (
+                        <span key={code}>
+                          <Box component="span" sx={{ fontWeight: 'bold' }}>{code}</Box>
+                          {item.kpved_names?.[i] ? ` — ${item.kpved_names[i]}` : ''}
+                          {i < (item.kpved_codes?.length ?? 0) - 1 ? '; ' : ''}
+                        </span>
+                      ))}
+                    </Typography>
+                  ) : null}
+
+                  {item.tnved_codes?.length ? (
+                    <Typography sx={{ fontSize: '0.65rem', color: '#546e7a', lineHeight: 1.5 }}>
+                      <Box component="span" sx={{ fontWeight: 'bold', color: '#78909c', textTransform: 'uppercase', letterSpacing: 0.3 }}>ТНВЭД: </Box>
+                      {item.tnved_codes.join('; ')}
+                    </Typography>
+                  ) : null}
+                </Box>
+              )}
+            </Box>
+          ),
         };
       default:
-        return { title: '', placeholder: '', fetch: async () => [], getLabel: () => '', extractCode: () => '' };
+        return { title: '', placeholder: '', fetch: async () => [], getLabel: () => '', extractCode: () => '', renderOption: undefined };
     }
   };
 
@@ -729,6 +844,7 @@ const KtpSearchPage: React.FC = () => {
         onSelect={handleModalSelect}
         getOptionLabel={config.getLabel}
         extractCode={config.extractCode}
+        renderOption={config.renderOption}
       />
     </Box>
   );

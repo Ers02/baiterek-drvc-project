@@ -256,7 +256,7 @@ def import_items_from_excel(db: Session, version_id: int, file_content: bytes) -
             original_unit_name=original_unit_name,
             expense_item_id=row.expense_id,
             funding_source_id=row.source_id,
-            agsk_id=agsk_code,
+            agsk_code=agsk_code,
             kato_purchase_id=kato_p_id,
             kato_delivery_id=kato_d_id,
             additional_specs=row.additional_specs,

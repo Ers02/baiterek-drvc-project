@@ -23,7 +23,7 @@ class ProductGroup(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Связь с пользователем
     creator = relationship("User", foreign_keys=[created_by])
@@ -38,7 +38,7 @@ class ProductGroupSet(Base):
     description = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Связь с группами
     items = relationship("ProductGroupSetItem", back_populates="set_obj", cascade="all, delete-orphan")

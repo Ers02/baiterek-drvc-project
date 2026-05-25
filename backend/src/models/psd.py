@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Numeric, Index, UniqueConstraint, Date
+    Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Numeric, Index, Date
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -39,13 +39,13 @@ class ExternalDocument(Base):
     deadline_at = Column(DateTime(timezone=True), nullable=True) # Рассчитанная дата дедлайна
 
     completed_at = Column(DateTime(timezone=True), nullable=True)
-    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_to = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     assigned_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+
     # Новое поле для тестовых проектов
     is_test = Column(Boolean, default=False, server_default='false')
-    
+
     assigned_user = relationship("User", foreign_keys=[assigned_to])
 
 class PsdDocumentItem(Base):
@@ -72,43 +72,43 @@ class PsdDocumentItem(Base):
     match_reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
+    item_type = Column(String(100), nullable=True, server_default='GOODS')
     __table_args__ = (
         Index('idx_psd_items_doc_id', 'document_id'),
         Index('idx_psd_items_code_sn', 'code_sn'),
     )
 
-class AgskReestrKtpMatch(Base):
-    """Библиотека замен: связь AGSK с несколькими товарами из Реестра КТП"""
-    __tablename__ = "agsk_reestr_ktp_matches"
+
+class AgskEnstruMatch(Base):
+    """Ручные сопоставления аналитиков АГСК → ЕНСТРУ, требующие утверждения менеджера"""
+    __tablename__ = "agsk_enstru_matches"
     id = Column(Integer, primary_key=True)
-    agsk_code = Column(String(50), nullable=False, index=True)
-    # Убрали ForeignKey на enstru.code - сопоставление идет с Реестром КТП, не со справочником
-    enstru_code = Column(String(35), nullable=False, index=True)
-    
-    ktp_id = Column(Integer, ForeignKey("reestr_ktp.id"), nullable=False)
-    
-    source = Column(String(20), default="manual")
-    agsk_name_ru = Column(Text, nullable=True)
-    enstru_name_ru = Column(Text, nullable=True)
-    product_name_ktp = Column(Text, nullable=True)
-    
-    dvc_percent = Column(Numeric(5, 2), nullable=True)
-    
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    psd_document_id = Column(Integer, ForeignKey("external_documents.id"), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    is_active = Column(Boolean, default=True)
-    
+    agsk_code = Column(String(50), nullable=False)
+    enstru_code = Column(String(35), nullable=False)
+    # Контекст: если doc_id/item_id заполнены — сопоставление в рамках документа ПСД
+    # Если null — общее глобальное сопоставление АГСК→ЕНСТРУ
+    doc_id = Column(Integer, ForeignKey("external_documents.id", ondelete="CASCADE"), nullable=True)
+    item_id = Column(Integer, ForeignKey("psd_document_items.id", ondelete="CASCADE"), nullable=True)
+    matched_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    matched_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_approved = Column(Boolean, default=False, nullable=False, server_default='false')
+    approved_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, server_default='true')
+
     __table_args__ = (
-        UniqueConstraint('agsk_code', 'enstru_code', 'ktp_id', name='uq_agsk_reestr_ktp_manual_v2'),
+        Index('idx_aem_agsk_code', 'agsk_code'),
+        Index('idx_aem_item_id', 'item_id'),
+        Index('idx_aem_doc_id', 'doc_id'),
+        Index('idx_aem_matched_by', 'matched_by'),
     )
+
 
 class PsdAnalysisSession(Base):
     __tablename__ = "psd_analysis_sessions"
     id = Column(Integer, primary_key=True)
-    document_id = Column(Integer, ForeignKey("external_documents.id"), nullable=False)
-    analyst_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    document_id = Column(Integer, ForeignKey("external_documents.id", ondelete="CASCADE"), nullable=False)
+    analyst_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     status = Column(String(20), default="in_progress")
     total_agsk_count = Column(Integer, default=0)
     matched_count = Column(Integer, default=0)
@@ -126,5 +126,5 @@ class AdminTask(Base):
     error_details = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_to = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     assigned_at = Column(DateTime(timezone=True), nullable=True)

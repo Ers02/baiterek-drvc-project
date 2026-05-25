@@ -152,12 +152,12 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
         for idx, item in enumerate(items, 1):
             agsk_value = ""
             if is_smr(item.expense_item_id):
-                if item.agsk_id:
-                    agsk_value = item.agsk_id
+                if item.agsk_code:
+                    agsk_value = item.agsk_code
                 else:
                     agsk_value = "Прайс-лист"
-            elif item.agsk_id:
-                agsk_value = item.agsk_id
+            elif item.agsk_code:
+                agsk_value = item.agsk_code
             
             unit_display = item.unit.name_ru if item.unit else (item.original_unit_name or "")
 
@@ -301,12 +301,12 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
 
                     agsk_value = ""
                     if is_smr(item.expense_item_id):
-                        if item.agsk_id:
-                            agsk_value = item.agsk_id
+                        if item.agsk_code:
+                            agsk_value = item.agsk_code
                         else:
                             agsk_value = "Прайс-лист"
-                    elif item.agsk_id:
-                        agsk_value = item.agsk_id
+                    elif item.agsk_code:
+                        agsk_value = item.agsk_code
 
                     row_data = [
                         format_item_number(idx, item),
@@ -384,12 +384,12 @@ def export_plan_to_excel(db: Session, plan_id: int, version_id: int = None) -> b
             if item.resident_share < 100:
                 agsk_value = ""
                 if is_smr(item.expense_item_id):
-                    if item.agsk_id:
-                        agsk_value = item.agsk_id
+                    if item.agsk_code:
+                        agsk_value = item.agsk_code
                     else:
                         agsk_value = "Прайс-лист"
-                elif item.agsk_id:
-                    agsk_value = item.agsk_id
+                elif item.agsk_code:
+                    agsk_value = item.agsk_code
 
                 row_data = [
                     format_item_number(idx, item),

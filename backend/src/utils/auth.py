@@ -105,12 +105,26 @@ def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
     """
     Зависимость для проверки прав администратора (полный контроль).
     """
-    if current_user.role in [UserRole.ADMIN, UserRole.DIRECTOR_DRVC, UserRole.ANALYST_DRVC]:
+    if current_user.role in [UserRole.ADMIN, UserRole.DIRECTOR_DRVC, UserRole.ANALYST_DRVC, UserRole.ANALYST_MANAGER]:
         return current_user
-    
+
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Доступ запрещен"
+    )
+
+
+def get_current_analyst_manager(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Зависимость: только менеджер аналитиков или админ.
+    Используется для утверждения/отклонения сопоставлений.
+    """
+    if current_user.role in [UserRole.ADMIN, UserRole.ANALYST_MANAGER]:
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Требуются права менеджера аналитиков"
     )
 
 

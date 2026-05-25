@@ -45,7 +45,7 @@ class PlanItemBase(BaseModel):
     unit_id: Optional[int] = None
     expense_item_id: int
     funding_source_id: int
-    agsk_id: Optional[str] = None
+    agsk_code: Optional[str] = None
     kato_purchase_id: Optional[int] = None
     kato_delivery_id: Optional[int] = None
     additional_specs: Optional[str] = None
@@ -71,7 +71,7 @@ class PlanItemUpdate(PlanItemBase):
     unit_id: Optional[int] = None
     expense_item_id: Optional[int] = None
     funding_source_id: Optional[int] = None
-    agsk_id: Optional[str] = None
+    agsk_code: Optional[str] = None
     kato_purchase_id: Optional[int] = None
     kato_delivery_id: Optional[int] = None
     additional_specs: Optional[str] = None

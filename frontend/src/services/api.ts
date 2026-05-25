@@ -189,28 +189,6 @@ export const importKenmlTemplate = (file: File): Promise<void> => {
 export const adminGetUsers = (): Promise<any[]> => api.get('/admin/users').then(res => res.data);
 export const adminGetPlans = (): Promise<any[]> => api.get('/admin/plans').then(res => res.data);
 
-export const adminAnalyzePsd = (file: File): Promise<{ task_id: string; message: string }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    return api.post('/admin/analyze-psd', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-    }).then(res => res.data);
-};
-
-export const getAdminTaskStatus = (taskId: string): Promise<{ status: string; message: string; error?: string }> =>
-    api.get(`/admin/tasks/${taskId}`).then(res => res.data);
-
-export const downloadAdminTaskResult = async (taskId: string): Promise<void> => {
-    const response = await api.get(`/admin/tasks/${taskId}/result`, { responseType: 'blob' });
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `analysis_result_${taskId}.xlsx`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-};
-
 export const getExternalDocs = (): Promise<any[]> => api.get('/admin/external/documents').then(res => res.data);
 
 export const uploadExternalDoc = (

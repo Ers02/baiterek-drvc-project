@@ -1,56 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box, Container, Typography, Paper, Tabs, Tab, Button,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   CircularProgress, Alert, Chip, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, MenuItem, IconButton, Tooltip, Grid, Card, Divider
+  TextField, MenuItem, IconButton, Tooltip, Grid, Divider
 } from '@mui/material';
-import { 
-    Upload as UploadIcon, Person as PersonIcon, Description as DescriptionIcon, 
-    Analytics as AnalyticsIcon, Inbox as InboxIcon, Download as DownloadIcon,
+import {
+    Upload as UploadIcon, Person as PersonIcon, Description as DescriptionIcon,
+    Inbox as InboxIcon, Download as DownloadIcon,
     Send as SendIcon, CheckCircle as CheckCircleIcon,
-    AccessTime as AccessTimeIcon, InsertChart as InsertChartIcon,
-    MonetizationOn as MonetizationOnIcon, PieChart as PieChartIcon,
-    ListAlt as ListAltIcon, Category as CategoryIcon,
+    AccessTime as AccessTimeIcon,
     ContactPage as ContactIcon
 } from '@mui/icons-material';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip as ChartTooltip,
-  Legend,
-  ArcElement, // Needed for Pie charts
-} from 'chart.js';
-import { Bar, Pie } from 'react-chartjs-2';
 import Header from '../components/Header';
 import { calculateWorkingDays } from '../utils/dateUtils';
 import {
     adminGetUsers,
     adminGetPlans,
-    adminAnalyzePsd,
-    getAdminTaskStatus,
-    downloadAdminTaskResult,
     getExternalDocs,
     uploadExternalDoc,
     sendExternalResponse,
     downloadExternalSource,
-    uploadEstimateTemplate,
-    getEstimateAnalysis,
 } from '../services/api';
-
-// Register Chart.js components
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  ChartTooltip,
-  Legend,
-  ArcElement // Register ArcElement for Pie charts
-);
 
 interface User {
   id: number;
@@ -167,105 +138,6 @@ const PlansTab = () => {
         </TableBody>
       </Table>
     </TableContainer>
-  );
-};
-
-const AnalyticsTab = () => {
-  const [error, setError] = useState('');
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string>('');
-
-  const isDownloading = useRef(false);
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!event.target.files || event.target.files.length === 0) return;
-    
-    const file = event.target.files[0];
-    setError('');
-    isDownloading.current = false;
-
-    try {
-      const response = await adminAnalyzePsd(file);
-      setTaskId(response.task_id);
-      setMessage(response.message);
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
-      setError(errorMsg || "Ошибка запуска анализа");
-    } finally {
-      event.target.value = '';
-    }
-  };
-
-  useEffect(() => {
-    if (!taskId) return;
-
-    const interval = setInterval(async () => {
-        if (isDownloading.current) return;
-
-        try {
-            const statusData = await getAdminTaskStatus(taskId);
-            setMessage(statusData.message);
-
-            if (statusData.status === 'completed') {
-                clearInterval(interval);
-                isDownloading.current = true;
-
-                try {
-                    await downloadAdminTaskResult(taskId);
-                } catch (_e) {
-                    console.error("Download error:", _e);
-                    setError("Ошибка скачивания файла");
-                } finally {
-                    setTaskId(null);
-                    setMessage('');
-                    isDownloading.current = false;
-                }
-            } else if (statusData.status === 'error') {
-                clearInterval(interval);
-                setError(`Ошибка анализа: ${statusData.error}`);
-                setTaskId(null);
-            }
-        } catch (_e) {
-            console.error("Error polling task status", _e);
-            clearInterval(interval);
-            setTaskId(null);
-            setError("Ошибка связи с сервером");
-        }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [taskId]);
-
-  return (
-    <Box>
-      <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
-        <Button
-          variant="contained"
-          component="label"
-          startIcon={<UploadIcon />}
-          disabled={!!taskId}
-        >
-          {taskId ? "Анализ..." : "Загрузить ПСД (KENML/ZIP)"}
-          <input type="file" hidden accept=".kenml,.xml,.zip" onChange={handleFileUpload} />
-        </Button>
-        <Typography variant="body2" color="text.secondary">
-            Загрузите файл для поиска поставщиков и генерации отчета.
-        </Typography>
-      </Box>
-
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-      <Dialog open={!!taskId} disableEscapeKeyDown>
-        <DialogTitle>Анализ ПСД</DialogTitle>
-        <DialogContent>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 300, py: 2 }}>
-                <CircularProgress sx={{ mb: 2 }} />
-                <Typography variant="body1" gutterBottom align="center">{message}</Typography>
-                <Typography variant="caption" color="text.secondary">Пожалуйста, подождите...</Typography>
-            </Box>
-        </DialogContent>
-      </Dialog>
-    </Box>
   );
 };
 
@@ -509,158 +381,6 @@ const ExternalDocsTab = () => {
     );
 };
 
-const SummaryCard = ({ title, value, icon }: { title: string, value: string | number, icon: React.ReactElement }) => (
-    <Card sx={{ display: 'flex', alignItems: 'center', p: 2 }}>
-        <Box sx={{ mr: 2, color: 'primary.main' }}>{icon}</Box>
-        <Box>
-            <Typography variant="h6" fontWeight="bold">{value}</Typography>
-            <Typography variant="body2" color="text.secondary">{title}</Typography>
-        </Box>
-    </Card>
-);
-
-const EstimateTemplateTab = () => {
-    const [file, setFile] = useState<File | null>(null);
-    const [uploading, setUploading] = useState(false);
-    const [uploadMessage, setUploadMessage] = useState('');
-    const [uploadError, setUploadError] = useState('');
-    interface AnalysisSummary {
-        totalAmount: string;
-        itemCount: number;
-        localContentPercentage: string;
-        uniqueCategories: number;
-    }
-    interface ChartData {
-        labels: string[];
-        datasets: { data: number[]; backgroundColor?: string[] }[];
-    }
-    interface AnalysisData {
-        summary: AnalysisSummary;
-        costItemAnalysis: { chartData: ChartData };
-        localContentAnalysis: { chartData: ChartData };
-        fundingSourceAnalysis: { chartData: ChartData };
-    }
-    const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
-    const [analysisLoading, setAnalysisLoading] = useState(false);
-    const [analysisError, setAnalysisError] = useState('');
-
-    const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-        if (!event.target.files || event.target.files.length === 0) return;
-        setFile(event.target.files[0]);
-        setUploadMessage('');
-        setUploadError('');
-    };
-
-    const handleUploadButtonClick = async () => {
-        if (!file) {
-            setUploadError("Пожалуйста, выберите файл для загрузки.");
-            return;
-        }
-        setUploading(true);
-        setUploadMessage('');
-        setUploadError('');
-        try {
-            const response = await uploadEstimateTemplate(file);
-            setUploadMessage(response.message);
-            setFile(null);
-        } catch (e: unknown) {
-            const errorMsg = e instanceof Error ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
-            setUploadError(errorMsg || "Ошибка загрузки шаблона.");
-        } finally {
-            setUploading(false);
-        }
-    };
-
-    const handleAnalyzeButtonClick = async () => {
-        setAnalysisLoading(true);
-        setAnalysisError('');
-        setAnalysisData(null);
-        try {
-            const data = await getEstimateAnalysis();
-            setAnalysisData(data);
-        } catch (e: unknown) {
-            const errorMsg = e instanceof Error ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail : undefined;
-            setAnalysisError(errorMsg || "Ошибка получения данных для анализа.");
-        } finally {
-            setAnalysisLoading(false);
-        }
-    };
-
-    return (
-        <Box>
-            <Typography variant="h6" gutterBottom>Загрузка шаблона сметы</Typography>
-            <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
-                <Button variant="contained" component="label" startIcon={<UploadIcon />} disabled={uploading}>
-                    {file ? file.name : "Выбрать файл сметы (Excel)"}
-                    <input type="file" hidden accept=".xlsx,.xls" onChange={handleFileUpload} />
-                </Button>
-                <Button variant="contained" onClick={handleUploadButtonClick} disabled={!file || uploading}>
-                    {uploading ? <CircularProgress size={24} /> : "Загрузить"}
-                </Button>
-            </Box>
-            {uploadMessage && <Alert severity="success" sx={{ mb: 2 }}>{uploadMessage}</Alert>}
-            {uploadError && <Alert severity="error" sx={{ mb: 2 }}>{uploadError}</Alert>}
-
-            <Typography variant="h6" gutterBottom sx={{ mt: 4 }}>Анализ сметы</Typography>
-            <Box sx={{ mb: 3 }}>
-                <Button variant="contained" startIcon={<InsertChartIcon />} onClick={handleAnalyzeButtonClick} disabled={analysisLoading}>
-                    {analysisLoading ? <CircularProgress size={24} /> : "Показать анализ"}
-                </Button>
-            </Box>
-
-            {analysisLoading && <CircularProgress />}
-            {analysisError && <Alert severity="error" sx={{ mb: 2 }}>{analysisError}</Alert>}
-            
-            {analysisData && (
-                <Box>
-                    <Grid container spacing={3} sx={{ mb: 3 }}>
-                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                            <SummaryCard title="Общая сумма" value={analysisData.summary.totalAmount} icon={<MonetizationOnIcon fontSize="large" />} />
-                        </Grid>
-                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                            <SummaryCard title="Кол-во позиций" value={analysisData.summary.itemCount} icon={<ListAltIcon fontSize="large" />} />
-                        </Grid>
-                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                            <SummaryCard title="Доля ВЦ" value={analysisData.summary.localContentPercentage} icon={<PieChartIcon fontSize="large" />} />
-                        </Grid>
-                        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                            <SummaryCard title="Статей затрат" value={analysisData.summary.uniqueCategories} icon={<CategoryIcon fontSize="large" />} />
-                        </Grid>
-                    </Grid>
-
-                    <Grid container spacing={4}>
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <Paper elevation={3} sx={{ p: 2, height: '100%' }}>
-                                <Typography variant="h6" gutterBottom>Топ-10 Статей Затрат</Typography>
-                                <Box sx={{ height: 400 }}>
-                                    <Bar options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }} data={analysisData.costItemAnalysis.chartData} />
-                                </Box>
-                            </Paper>
-                        </Grid>
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <Grid container spacing={3}>
-                                <Grid size={{ xs: 12, sm: 6 }}>
-                                    <Paper elevation={3} sx={{ p: 2 }}>
-                                        <Typography variant="h6" align="center" gutterBottom>Доля ВЦ</Typography>
-                                        <Pie data={analysisData.localContentAnalysis.chartData} />
-                                    </Paper>
-                                </Grid>
-                                <Grid size={{ xs: 12, sm: 6 }}>
-                                    <Paper elevation={3} sx={{ p: 2 }}>
-                                        <Typography variant="h6" align="center" gutterBottom>Источники</Typography>
-                                        <Pie data={analysisData.fundingSourceAnalysis.chartData} />
-                                    </Paper>
-                                </Grid>
-                            </Grid>
-                        </Grid>
-                    </Grid>
-                </Box>
-            )}
-        </Box>
-    );
-};
-
-
 export default function AdminPage() {
   const [tab, setTab] = useState(0);
 
@@ -675,8 +395,6 @@ export default function AdminPage() {
         <Paper sx={{ mb: 3 }}>
           <Tabs value={tab} onChange={(_event, v) => setTab(v)} centered>
             <Tab icon={<InboxIcon />} label="Входящие документы" />
-            <Tab icon={<AnalyticsIcon />} label="Аналитика ПСД (Ручная)" />
-            <Tab icon={<InsertChartIcon />} label="Анализ Сметы" />
             <Tab icon={<PersonIcon />} label="Пользователи" />
             <Tab icon={<DescriptionIcon />} label="Все планы" />
           </Tabs>
@@ -684,10 +402,8 @@ export default function AdminPage() {
 
         <Box sx={{ mt: 2 }}>
           {tab === 0 && <ExternalDocsTab />}
-          {tab === 1 && <AnalyticsTab />}
-          {tab === 2 && <EstimateTemplateTab />}
-          {tab === 3 && <UsersTab />}
-          {tab === 4 && <PlansTab />}
+          {tab === 1 && <UsersTab />}
+          {tab === 2 && <PlansTab />}
         </Box>
       </Container>
     </>

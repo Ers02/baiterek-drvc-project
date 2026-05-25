@@ -48,13 +48,11 @@ def update_item(db: Session, item_id: int, item_in: plan_schema.PlanItemUpdate,
         expense_item = db.query(models.Cost_Item).filter(models.Cost_Item.id == expense_item_id).first()
         # Более мягкая проверка на СМР (регистронезависимая и на вхождение)
         if expense_item and "смр" not in expense_item.name_ru.lower():
-            update_data['agsk_id'] = None
+            update_data['agsk_code'] = None
     elif 'expense_item_id' not in update_data:
-        # Если статья затрат не меняется, проверяем текущую
         if db_item.expense_item and "смр" not in db_item.expense_item.name_ru.lower():
-            # Если текущая не СМР, но пытаются обновить agsk_id (вдруг), то сбрасываем
-            if 'agsk_id' in update_data:
-                update_data['agsk_id'] = None
+            if 'agsk_code' in update_data:
+                update_data['agsk_code'] = None
 
     for key, value in update_data.items():
         setattr(db_item, key, value)
@@ -150,7 +148,7 @@ def revert_item(db: Session, item_id: int, user: models.User) -> models.PlanItem
     # Копируем данные из предыдущей версии
     fields_to_copy = [
         'trucode', 'unit_id', 'expense_item_id', 'funding_source_id',
-        'agsk_id', 'kato_purchase_id', 'kato_delivery_id',
+        'agsk_code', 'kato_purchase_id', 'kato_delivery_id',
         'additional_specs',
         'quantity', 'price_per_unit', 'total_amount',
         'is_ktp', 'resident_share', 'non_resident_reason', 'need_type',

@@ -5,10 +5,11 @@ from sqlalchemy.sql import func
 from ..database.base import Base
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"               # Супер-администратор, может всё включая справочники
-    DIRECTOR_DRVC = "director_drvc" # Директор ДРВЦ
-    ANALYST_DRVC = "analyst_drvc" # Аналитик ДРВЦ
-    USER = "user"                 # Обычный пользователь
+    ADMIN = "admin"                       # Супер-администратор, может всё включая справочники
+    DIRECTOR_DRVC = "director_drvc"       # Директор ДРВЦ
+    ANALYST_DRVC = "analyst_drvc"         # Аналитик ДРВЦ
+    ANALYST_MANAGER = "analyst_manager"   # Менеджер аналитиков — утверждает сопоставления
+    USER = "user"                         # Обычный пользователь
 
 class User(Base):
     __tablename__ = "users"
@@ -27,7 +28,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Поля для делегирования полномочий
-    delegated_to_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    delegated_to_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     delegation_start = Column(DateTime(timezone=True), nullable=True)
     delegation_end = Column(DateTime(timezone=True), nullable=True)
 

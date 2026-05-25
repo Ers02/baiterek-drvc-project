@@ -7,10 +7,10 @@ from .plan import (
     PlanItem,
     PlanItemCreate
 )
-from .psd import ManualMatchCreate, ExternalDocumentSchema, PsdDocumentItemSchema
+from .psd import ExternalDocumentSchema, PsdDocumentItemSchema
 
 __all__ = [
     "User", "UserCreate", "UserLogin", "Token", "TokenData", "Plan",
     "PlanModel", "PlanCreate", "PlanUpdate", "PlanVersion", "PlanItem", "PlanItemCreate",
-    "ManualMatchCreate", "ExternalDocumentSchema", "PsdDocumentItemSchema"
+    "ExternalDocumentSchema", "PsdDocumentItemSchema"
 ]

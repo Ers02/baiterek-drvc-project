@@ -1,26 +1,8 @@
 from pydantic import BaseModel, ConfigDict, field_validator
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from decimal import Decimal
 
-class AgskLibraryItemSchema(BaseModel):
-    id: int
-    agsk_code: str
-    enstru_code: str
-    enstru_name_ru: Optional[str] = None
-    product_name_ktp: Optional[str] = None
-    dvc_percent: Optional[float] = None
-    is_active: bool
-    
-    model_config = ConfigDict(from_attributes=True)
-
-class ManualMatchCreate(BaseModel):
-    agsk_code: str
-    enstru_code: str
-    doc_id: Optional[int] = None
-    ktp_id: Optional[int] = None
-    product_name_ktp: Optional[str] = None
-    dvc_percent: Optional[float] = None
 
 class ExternalDocumentSchema(BaseModel):
     id: int
@@ -66,6 +48,13 @@ class ExternalDocumentSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class ManualMatchStatusSchema(BaseModel):
+    id: int
+    enstru_code: str
+    status: str  # 'pending' | 'approved' | 'rejected'
+    matched_at: Optional[datetime] = None
+    approved_at: Optional[datetime] = None
+
 class PsdDocumentItemSchema(BaseModel):
     id: int
     document_id: int
@@ -84,7 +73,8 @@ class PsdDocumentItemSchema(BaseModel):
     not_in_ktp_registry: bool = False
     agsk_name_ru: Optional[str] = None
     agsk_full_name: Optional[str] = None
-
+    item_type: Optional[str] = "GOODS"
+    current_manual_match: Optional[Any] = None
     model_config = ConfigDict(from_attributes=True)
 
 class PsdItemsResponse(BaseModel):
@@ -92,3 +82,28 @@ class PsdItemsResponse(BaseModel):
     total: int
     skip: int
     limit: int
+    pending_match_count: int = 0
+
+class SaveMatchRequest(BaseModel):
+    enstru_code: str
+
+class AgskEnstruMatchSchema(BaseModel):
+    id: int
+    agsk_code: str
+    enstru_code: str
+    doc_id: Optional[int] = None
+    item_id: Optional[int] = None
+    item_name: Optional[str] = None
+    matched_by: int
+    analyst_name: Optional[str] = None
+    matched_at: Optional[datetime] = None
+    is_approved: bool
+    is_active: bool
+    approved_by: Optional[int] = None
+    approved_by_name: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    status: str  # 'pending' | 'approved' | 'rejected'
+
+class AgskEnstruMatchesResponse(BaseModel):
+    items: List[AgskEnstruMatchSchema]
+    total: int

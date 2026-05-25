@@ -194,7 +194,7 @@ export default function PlanItemForm() {
       expense_item_id: formData.expense_item?.id,
       funding_source_id: formData.funding_source?.id,
       // Если выбран "Прайс-лист", отправляем null, иначе - код АГСК
-      agsk_id: formData.agsk?.code === PRICE_LIST_AGSK_OPTION.code ? null : formData.agsk?.code,
+      agsk_code: formData.agsk?.code === PRICE_LIST_AGSK_OPTION.code ? null : formData.agsk?.code,
       kato_purchase_id: formData.kato_purchase?.id,
       kato_delivery_id: formData.kato_delivery?.id,
       additional_specs: formData.additional_specs,
