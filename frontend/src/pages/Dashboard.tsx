@@ -3,7 +3,7 @@ import {
   Box, Button, Typography, Paper, CircularProgress, Alert,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, DialogContentText,
-  Collapse, Chip, Tooltip, Stack, Tabs, Tab, InputAdornment, Grid, Container
+  Collapse, Chip, Tooltip, Stack, Tabs, Tab, InputAdornment, Container
 } from '@mui/material';
 import {
   Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon,
@@ -26,14 +26,22 @@ import { jwtDecode } from 'jwt-decode';
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 }).format(amount);
 
-const getStatusChipColor = (status: PlanStatus, isExecuted: boolean) => {
+type ChipColor = 'success' | 'warning' | 'primary' | 'default';
+const getStatusChipColor = (status: PlanStatus, isExecuted: boolean): ChipColor => {
   if (isExecuted) return "success";
   switch (status) {
-    case PlanStatus.DRAFT: return "info";
+    case PlanStatus.DRAFT: return "default";       // мягкий серый — не выбивается из зелёной темы
     case PlanStatus.PRE_APPROVED: return "warning";
     case PlanStatus.APPROVED: return "primary";
     default: return "default";
   }
+};
+
+// Filled-чипы для завершённых статусов, outlined — для промежуточных
+const getStatusChipVariant = (status: PlanStatus, isExecuted: boolean): 'filled' | 'outlined' => {
+  if (isExecuted) return 'filled';
+  if (status === PlanStatus.APPROVED) return 'filled';
+  return 'outlined';
 };
 
 const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReload: () => void; }) => {
@@ -88,7 +96,11 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
 
   return (
     <Fragment>
-      <TableRow sx={{ '& > *': { borderBottom: 'unset' } }}>
+      <TableRow sx={{
+        '& > *': { borderBottom: 'unset' },
+        transition: 'background-color 0.15s',
+        '&:hover': { bgcolor: 'rgba(11,75,50,0.03)' },
+      }}>
         <TableCell width="50px">
           <IconButton aria-label="expand row" size="small" onClick={() => setOpen(!open)}>
             {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
@@ -115,46 +127,68 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
           <Chip
             label={isExecuted ? t('status_EXECUTED') : t(`status_${activeVersion?.status || 'DRAFT'}`)}
             color={getStatusChipColor(activeVersion?.status || PlanStatus.DRAFT, isExecuted)}
+            variant={getStatusChipVariant(activeVersion?.status || PlanStatus.DRAFT, isExecuted)}
             size="small"
             icon={isExecuted ? <CheckCircleIcon /> : undefined}
+            sx={{ fontWeight: 600, borderRadius: 1.5 }}
           />
         </TableCell>
         <TableCell width="180px" align="right">{formatCurrency(activeVersion?.total_amount || 0)}</TableCell>
         <TableCell width="150px" align="right">
-          <Stack direction="row" justifyContent="flex-end" spacing={1}>
+          <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
             {activeVersion?.status === PlanStatus.DRAFT ? (
                 <Tooltip title={t('edit_draft')}>
-                <IconButton size="small" onClick={() => navigate(`/plans/${plan.id}`)}>
-                    <EditIcon />
+                <IconButton
+                    size="small"
+                    onClick={() => navigate(`/plans/${plan.id}`)}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main', bgcolor: 'rgba(11,75,50,0.06)' } }}
+                >
+                    <EditIcon fontSize="small" />
                 </IconButton>
                 </Tooltip>
             ) : (
                 <Tooltip title={t('view_plan')}>
-                <IconButton size="small" onClick={() => navigate(`/plans/${plan.id}`)}>
-                    <VisibilityIcon />
+                <IconButton
+                    size="small"
+                    onClick={() => navigate(`/plans/${plan.id}`)}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main', bgcolor: 'rgba(11,75,50,0.06)' } }}
+                >
+                    <VisibilityIcon fontSize="small" />
                 </IconButton>
                 </Tooltip>
             )}
-            
+
             {activeVersion?.status !== PlanStatus.DRAFT && (
                 <Tooltip title={t('create_new_version_tooltip')}>
-                <IconButton size="small" color="primary" onClick={handleCreateNewVersion}>
-                    <FileCopyIcon />
+                <IconButton
+                    size="small"
+                    onClick={handleCreateNewVersion}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main', bgcolor: 'rgba(11,75,50,0.06)' } }}
+                >
+                    <FileCopyIcon fontSize="small" />
                 </IconButton>
                 </Tooltip>
             )}
 
             {activeVersion?.status === PlanStatus.DRAFT && (activeVersion?.version_number || 0) > 1 && (
                 <Tooltip title={t('delete_draft_version_tooltip')}>
-                <IconButton size="small" color="secondary" onClick={handleDeleteLatest}>
-                    <RestoreFromTrashIcon />
+                <IconButton
+                    size="small"
+                    onClick={handleDeleteLatest}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'warning.main', bgcolor: 'rgba(237,108,2,0.08)' } }}
+                >
+                    <RestoreFromTrashIcon fontSize="small" />
                 </IconButton>
                 </Tooltip>
             )}
             {canDeletePlan && (
                 <Tooltip title={t('delete_plan_tooltip')}>
-                <IconButton size="small" color="error" onClick={handleDeletePlan}>
-                    <DeleteIcon />
+                <IconButton
+                    size="small"
+                    onClick={handleDeletePlan}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'error.main', bgcolor: 'rgba(211,47,47,0.08)' } }}
+                >
+                    <DeleteIcon fontSize="small" />
                 </IconButton>
                 </Tooltip>
             )}
@@ -186,10 +220,12 @@ const PlanRow = React.memo(({ plan, onReload }: { plan: ProcurementPlan; onReloa
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Chip 
+                        <Chip
                             label={version.is_executed ? t('status_EXECUTED') : t(`status_${version.status || 'DRAFT'}`)}
-                            color={getStatusChipColor(version.status, version.is_executed)} 
-                            size="small" 
+                            color={getStatusChipColor(version.status, version.is_executed)}
+                            variant={getStatusChipVariant(version.status, version.is_executed)}
+                            size="small"
+                            sx={{ fontWeight: 600, borderRadius: 1.5 }}
                         />
                       </TableCell>
                       <TableCell align="right">{formatCurrency(version.total_amount)}</TableCell>
@@ -319,73 +355,97 @@ export default function Dashboard() {
     <>
       <Header />
       <Container maxWidth={false} sx={{ py: 4, px: { xs: 2, md: 4 } }}>
-        <Grid container spacing={3} alignItems="center" sx={{ mb: 4 }}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-                <Typography variant="h4" fontWeight="bold">
+        <Box sx={{
+          display: 'flex',
+          alignItems: { xs: 'flex-start', sm: 'center' },
+          justifyContent: 'space-between',
+          flexDirection: { xs: 'column', sm: 'row' },
+          gap: 2,
+          mb: 3,
+        }}>
+            <Box>
+                <Typography variant="h4" fontWeight={700} sx={{ color: 'primary.dark' }}>
                     {isAdmin ? t('dashboard_title') : userRole === 'analyst_drvc' ? 'Панель Аналитика ДРВЦ' : t('dashboard_title')}
                 </Typography>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }} sx={{ display: 'flex', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
-                {isAdmin ? (
-                    <Button 
-                        variant="contained" 
-                        color="secondary"
-                        startIcon={<AdminPanelSettingsIcon />} 
-                        onClick={() => navigate('/admin')}
-                    >
-                        Перейти в админку
-                    </Button>
-                ) : (
-                    <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenCreateDialog}>
-                        {t('create_plan')}
-                    </Button>
-                )}
-            </Grid>
-        </Grid>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Управление сметами и версиями
+                </Typography>
+            </Box>
+            {isAdmin ? (
+                <Button
+                    variant="contained"
+                    color="secondary"
+                    startIcon={<AdminPanelSettingsIcon />}
+                    onClick={() => navigate('/admin')}
+                    sx={{ borderRadius: 2, px: 2.5, py: 1 }}
+                >
+                    Перейти в админку
+                </Button>
+            ) : (
+                <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={handleOpenCreateDialog}
+                    sx={{ borderRadius: 2, px: 2.5, py: 1 }}
+                >
+                    {t('create_plan')}
+                </Button>
+            )}
+        </Box>
 
-        <Paper sx={{ mb: 3, p: 2 }}>
-            <Grid container spacing={2} alignItems="center">
-                <Grid size={{ xs: 12, md: 4 }}>
-                    <TextField
-                        fullWidth
-                        size="small"
-                        variant="outlined"
-                        placeholder={t('search_plans_placeholder')}
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        InputProps={{
-                            startAdornment: (
-                                <InputAdornment position="start">
-                                    <SearchIcon color="action" />
-                                </InputAdornment>
-                            ),
-                        }}
-                    />
-                </Grid>
-                <Grid size={{ xs: 12, md: 8 }}>
-                    <Tabs 
-                        value={currentTab} 
-                        onChange={handleTabChange} 
-                        indicatorColor="primary" 
-                        textColor="primary"
-                        variant="fullWidth"
-                        sx={{ '& .MuiTab-root': { flexGrow: 1, maxWidth: 'none' } }}
-                    >
-                        <Tab label={t('all_plans')} />
-                        <Tab label={t('status_DRAFT')} />
-                        <Tab label={t('status_PRE_APPROVED')} />
-                        <Tab label={t('status_APPROVED')} />
-                        <Tab label={t('status_EXECUTED')} />
-                    </Tabs>
-                </Grid>
-            </Grid>
+        <Paper elevation={0} sx={{
+          mb: 3,
+          border: '1px solid',
+          borderColor: 'divider',
+          overflow: 'hidden',
+        }}>
+            <Box sx={{
+              p: 1.5,
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              bgcolor: 'rgba(11,75,50,0.02)',
+            }}>
+                <TextField
+                    fullWidth
+                    size="small"
+                    variant="outlined"
+                    placeholder={t('search_plans_placeholder')}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    InputProps={{
+                        startAdornment: (
+                            <InputAdornment position="start">
+                                <SearchIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                            </InputAdornment>
+                        ),
+                        sx: { bgcolor: 'white', borderRadius: 2 },
+                    }}
+                />
+            </Box>
+            <Tabs
+                value={currentTab}
+                onChange={handleTabChange}
+                indicatorColor="primary"
+                textColor="primary"
+                variant="fullWidth"
+                sx={{
+                  '& .MuiTab-root': { flexGrow: 1, maxWidth: 'none', minHeight: 44, py: 1 },
+                  '& .MuiTabs-indicator': { height: 3, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
+                }}
+            >
+                <Tab label={t('all_plans')} />
+                <Tab label={t('status_DRAFT')} />
+                <Tab label={t('status_PRE_APPROVED')} />
+                <Tab label={t('status_APPROVED')} />
+                <Tab label={t('status_EXECUTED')} />
+            </Tabs>
         </Paper>
 
         {loading && <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}
         {error && !loading && <Alert severity="error">{error}</Alert>}
 
         {!loading && !error && (
-          <TableContainer component={Paper}>
+          <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid', borderColor: 'divider' }}>
             <Table aria-label="collapsible table">
               <TableHead>
                 <TableRow>
@@ -400,7 +460,7 @@ export default function Dashboard() {
                 {filteredPlans.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} align="center">
-                      <Typography color="text.secondary" sx={{ p: 3 }}>
+                      <Typography color="text.secondary" sx={{ p: 4, fontStyle: 'italic' }}>
                         {t('no_plans_found')}
                       </Typography>
                     </TableCell>
@@ -442,9 +502,9 @@ export default function Dashboard() {
             />
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>{t('cancel')}</Button>
-          <Button onClick={handleCreatePlan}>{t('create_button')}</Button>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setCreateDialogOpen(false)} color="inherit">{t('cancel')}</Button>
+          <Button variant="contained" onClick={handleCreatePlan}>{t('create_button')}</Button>
         </DialogActions>
       </Dialog>
     </>

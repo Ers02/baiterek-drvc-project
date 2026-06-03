@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import Login from './pages/Login';
+import Welcome from './pages/Welcome';
 import Dashboard from './pages/Dashboard';
 import PlanForm from './pages/PlanForm';
 import PlanItemForm from './pages/PlanItemForm';
@@ -10,10 +11,19 @@ import AdminPage from './pages/AdminPage';
 import PsdAnalystPage from './pages/PsdAnalystPage';
 import KtpSearchPage from './pages/KtpSearchPage';
 
-// Приватный роут для защиты страниц
+// Приватный роут для защиты страниц.
+// Неавторизованный пользователь попадает на приветственную страницу,
+// а уже оттуда переходит к форме входа.
 const PrivateRoute = ({ children }: { children: ReactNode }) => {
   const isAuthenticated = !!localStorage.getItem('token');
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
+  return isAuthenticated ? <>{children}</> : <Navigate to="/welcome" replace />;
+};
+
+// Приветственная страница доступна только неавторизованным —
+// если пользователь уже залогинен, отправляем на главную.
+const PublicOnlyRoute = ({ children }: { children: ReactNode }) => {
+  const isAuthenticated = !!localStorage.getItem('token');
+  return isAuthenticated ? <Navigate to="/" replace /> : <>{children}</>;
 };
 
 // Роут для админа и аналитика ДРВЦ
@@ -24,7 +34,7 @@ const AdminRoute = ({ children }: { children: ReactNode }) => {
       try {
           const decoded: { is_admin?: boolean; role?: string } = jwtDecode(lsToken);
           // Админ, директор или аналитик ДРВЦ имеют доступ к админке
-          hasAdminAccess = decoded.is_admin === true || decoded.role === 'analyst_drvc' || decoded.role === 'director_drvc';
+          hasAdminAccess = decoded.is_admin === true || decoded.role === 'ANALYST_DRVC' || decoded.role === 'DIRECTOR_DRVC' || decoded.role === 'ANALYST_MANAGER';
       } catch { /* ignore */ }
   }
 
@@ -38,7 +48,7 @@ const HomeRoute = ({ children }: { children: ReactNode }) => {
   if (lsToken) {
       try {
           const decoded: { role?: string } = jwtDecode(lsToken);
-          isAnalyst = decoded.role === 'analyst_drvc' || decoded.role === 'director_drvc';
+          isAnalyst = decoded.role === 'ANALYST_DRVC' || decoded.role === 'DIRECTOR_DRVC' || decoded.role === 'ANALYST_MANAGER';
       } catch { /* ignore */ }
   }
 
@@ -72,8 +82,9 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<Login setToken={handleSetToken} />} />
-        
+        <Route path="/welcome" element={<PublicOnlyRoute><Welcome /></PublicOnlyRoute>} />
+        <Route path="/login" element={<PublicOnlyRoute><Login setToken={handleSetToken} /></PublicOnlyRoute>} />
+
         {/* Защищенные маршруты */}
         <Route 
           path="/" 
@@ -106,7 +117,9 @@ function App() {
           element={<PrivateRoute><AdminRoute><KtpSearchPage /></AdminRoute></PrivateRoute>}
         />
 
-        <Route path="*" element={<Navigate to="/" />} />
+        <Route path="*" element={
+          <Navigate to={localStorage.getItem('token') ? '/' : '/welcome'} replace />
+        } />
       </Routes>
     </BrowserRouter>
   );

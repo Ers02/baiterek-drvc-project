@@ -13,20 +13,19 @@ import {
     DialogTitle, DialogContent, TextField, DialogActions, Tooltip,
     Pagination, Divider, Card, CardContent, InputAdornment,
     LinearProgress, CircularProgress, Stack, FormControlLabel, Switch,
-    ToggleButtonGroup, ToggleButton, MenuItem, Select, FormControl, InputLabel
+    ToggleButtonGroup, ToggleButton
 } from '@mui/material';
 import {
     Delete as DeleteIcon, Download as DownloadIcon,
     Search as SearchIcon, Refresh as RefreshIcon, Business as BusinessIcon,
     Close as CloseIcon, Edit as EditIcon,
+    Visibility as VisibilityIcon,
     AutoAwesome as AutoIcon,
     QrCode as AgskIcon,
     Category as CategoryIcon,
     InfoOutlined as InfoIcon,
-    LibraryBooks as LibraryIcon,
     FileDownload as FileDownloadIcon,
     Description as DescriptionIcon,
-    UploadFile as UploadIcon,
     Science as ScienceIcon,
     Person as PersonIcon,
     Email as EmailIcon,
@@ -38,7 +37,6 @@ import {
     CheckCircle as CheckCircleIcon,
     Send as SendIcon,
     Check as ApprovedIcon,
-    Reply as RejectIcon,
     SwapHoriz as DelegateIcon,
     Comment as CommentIcon,
     ExpandLess as ExpandLessIcon,
@@ -46,92 +44,21 @@ import {
 } from '@mui/icons-material';
 import {useTranslation} from '../i18n';
 import Header from '../components/Header';
-import api from '../services/api';
+import * as psdApi from './psd-analyst/api';
+import AssignDialog from './psd-analyst/dialogs/AssignDialog';
+import RejectDialog from './psd-analyst/dialogs/RejectDialog';
+import DelegateDialog from './psd-analyst/dialogs/DelegateDialog';
+import UploadDialog from './psd-analyst/dialogs/UploadDialog';
 import {calculateWorkingDays} from '../utils/dateUtils';
 import {UserRole} from '../services/api.types'; // Значение для runtime
-import type {User, ExternalDocument, ExternalDocumentStatus, ManualMatchStatus, AgskEnstruMatchItem} from '../services/api.types'; // Только типы
+import type {User, ExternalDocument, AgskEnstruMatchItem} from '../services/api.types'; // Только типы
 
-function useDebounce(value: string, delay: number) {
-    const [debouncedValue, setDebouncedValue] = useState(value);
-    useEffect(() => {
-        const handler = setTimeout(() => setDebouncedValue(value), delay);
-        return () => clearTimeout(handler);
-    }, [value, delay]);
-    return debouncedValue;
-}
-
-const Highlight: React.FC<{ text: string; search: string }> = ({text, search}) => {
-    if (!search.trim() || !text) return <>{text}</>;
-    const parts = text.split(new RegExp(`(${search.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi'));
-    return (
-        <>
-            {parts.map((part, i) =>
-                part.toLowerCase() === search.toLowerCase() ? (
-                    <Box component="span" key={i}
-                         sx={{bgcolor: '#fff59d', color: '#000', borderRadius: '2px', px: '2px'}}>
-                        {part}
-                    </Box>
-                ) : (
-                    part
-                )
-            )}
-        </>
-    );
-};
-
-interface AgskMatch {
-    id?: number;
-    document_id?: number;
-    item_id: number;
-    position_number: string;
-    name: string;
-    code_sn: string;
-    unit: string;
-    volume: number;
-    enstru_code?: string;
-    enstru_name?: string;
-    match_type: 'auto' | 'manual' | 'manual_ktp' | 'auto_ktp' | 'none';
-    match_score?: number;
-    match_reason?: string;
-    not_in_ktp_registry?: boolean;
-    item_type?: string;
-    price?: number;
-    total_amount?: number;
-    current_manual_matches?: ManualMatchStatus[];
-}
-
-interface ReestrResult {
-    ktp_id: number;
-    enstru_code: string;
-    enstru_name: string;
-    enstru_name_rus?: string;
-    enstru_detail_rus?: string;
-    enstru_standard?: string;
-    company: string;
-    bin: string;
-    product: string;
-    dvc_percent: number;
-    localization: string;
-    address: string;
-    registry_date: string;
-    region: string;
-    agsk3_codes?: string[];
-    agsk3_names?: string[];
-    oked_codes?: string[];
-    oked_names?: string[];
-    kpved_codes?: string[];
-    kpved_names?: string[];
-    tnved_codes?: string[];
-    tnved_names?: string[];
-}
-
-type SearchMode = 'all' | 'agsk' | 'name';
-
-const SEARCH_TABS: { mode: SearchMode; label: string; placeholder: string }[] = [
-    {mode: 'all', label: 'Все', placeholder: 'Поиск по всем полям...'},
-    {mode: 'agsk', label: 'АГСК-код', placeholder: 'Напр. 541-801 или 541-801-2066-58...'},
-    {mode: 'name', label: 'Название', placeholder: 'Название товара или компании...'},
-];
+// Локальные типы / хуки / утилиты страницы PSD-аналитика
+import type {AgskMatch, ReestrResult, SearchMode} from './psd-analyst/types';
+import {SEARCH_TABS} from './psd-analyst/types';
+import {useDebounce} from './psd-analyst/hooks';
+import {Highlight, ClassifierText} from './psd-analyst/components';
+import {getItemStatus, getDvcColor, getStatusChip} from './psd-analyst/utils';
 
 const PsdAnalystPage: React.FC = () => {
     const {t: _t} = useTranslation();
@@ -155,11 +82,8 @@ const PsdAnalystPage: React.FC = () => {
     const [delegateDialogOpen, setDelegateDialogOpen] = useState(false);
     const [targetDoc, setTargetDoc] = useState<ExternalDocument | null>(null);
     const [analysts, setAnalysts] = useState<{ id: number, full_name: string }[]>([]);
-    const [selectedAnalystId, setSelectedAnalystId] = useState<number | ''>('');
-    const [deadlineDays, setDeadlineDays] = useState(5);
-    const [rejectComment, setRejectComment] = useState('');
-    const [delegateTargetId, setDelegateTargetId] = useState<number | ''>('');
-    const [delegateDays, setDelegateDays] = useState(14);
+    // State диалогов (selectedAnalystId / deadlineDays / rejectComment / delegate*)
+    // инкапсулирован внутри компонентов ./psd-analyst/dialogs/*.tsx
 
     const [editDialogOpen, setEditDialogOpen] = useState(false);
     const [editingMatch, setEditingMatch] = useState<AgskMatch | null>(null);
@@ -179,9 +103,8 @@ const PsdAnalystPage: React.FC = () => {
     const [onlyUnmatched, setOnlyUnmatched] = useState(false);
 
     const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
-    const [testProjectName, setTestProjectName] = useState('');
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [uploading, setUploading] = useState(false);
+    // testProjectName / selectedFile инкапсулированы в UploadDialog
 
     // Состояния для комментария аналитика
     const [analystComment, setAnalystComment] = useState('');
@@ -191,8 +114,10 @@ const PsdAnalystPage: React.FC = () => {
     const [pendingMatchCount, setPendingMatchCount] = useState(0);
     const [matchesLibrary, setMatchesLibrary] = useState<AgskEnstruMatchItem[]>([]);
     const [matchesLibraryTotal, setMatchesLibraryTotal] = useState(0);
+    const [matchesLibraryPage, setMatchesLibraryPage] = useState(1);
     const [matchesLoading, setMatchesLoading] = useState(false);
     const [matchDateFilter, setMatchDateFilter] = useState<'all' | 'today'>('all');
+    const LIBRARY_PAGE_SIZE = 25;
     const [approvingId, setApprovingId] = useState<number | null>(null);
 
     const requestCounter = useRef(0);
@@ -211,17 +136,15 @@ const PsdAnalystPage: React.FC = () => {
         }
     }, [selectedDoc, onlyUnmatched, page, debouncedAgskSearch]);
 
-    useEffect(() => {
-        setReestrSearch('');
-        setReestrResults([]);
-    }, [searchMode]);
+    // Сброс поиска происходит только при РУЧНОЙ смене вкладки режима (см. onChange в Tabs ниже),
+    // НЕ при программной установке searchMode из openEditDialog — иначе pre-fill не работает.
 
     useEffect(() => {
         const archiveTabIndex = selectedDoc ? 2 : 1;
         if (activeTab === archiveTabIndex) {
             loadMatchesLibrary();
         }
-    }, [activeTab, matchDateFilter, selectedDoc]);
+    }, [activeTab, matchDateFilter, selectedDoc, matchesLibraryPage]);
 
     useEffect(() => {
         const minLen = searchMode === 'agsk' ? 3 : 2;
@@ -230,44 +153,37 @@ const PsdAnalystPage: React.FC = () => {
     }, [debouncedReestrSearch, searchMode]);
 
     const loadCurrentUser = async () => {
-        const res = await api.get('/auth/me');
-        console.log('Current user data:', res.data);
-        console.log('User role:', res.data?.role);
-        setCurrentUser(res.data);
+        const user = await psdApi.fetchCurrentUser();
+        setCurrentUser(user);
     };
 
     const loadAnalysts = async () => {
-        const res = await api.get('/psd-analyst/analysts');
-        setAnalysts(res.data);
+        setAnalysts(await psdApi.fetchAnalysts());
     };
 
     const loadDocuments = async () => {
         setListLoading(true);
         try {
-            const res = await api.get('/psd-analyst/documents', {
-                params: {is_test: showTests, assigned_to_me: assignedToMe}
-            });
-            setDocuments(res.data);
+            setDocuments(await psdApi.fetchDocuments(assignedToMe, showTests));
         } finally {
             setListLoading(false);
         }
     };
+
     const loadMatches = async (docId: number) => {
         const currentRequestId = ++requestCounter.current;
         setListLoading(true);
         try {
-            const res = await api.get(`/psd-analyst/document-items/${docId}`, {
-                params: {
-                    only_unmatched: onlyUnmatched,
-                    skip: (page - 1) * 50,
-                    limit: 50,
-                    search: debouncedAgskSearch || undefined
-                }
+            const data = await psdApi.fetchDocumentItems(docId, {
+                only_unmatched: onlyUnmatched,
+                skip: (page - 1) * 50,
+                limit: 50,
+                search: debouncedAgskSearch || undefined,
             });
             if (currentRequestId === requestCounter.current) {
-                setMatches(res.data.items);
-                setTotalCount(res.data.total);
-                setPendingMatchCount(res.data.pending_match_count ?? 0);
+                setMatches(data.items);
+                setTotalCount(data.total);
+                setPendingMatchCount(data.pending_match_count ?? 0);
             }
         } finally {
             if (currentRequestId === requestCounter.current) {
@@ -285,13 +201,11 @@ const PsdAnalystPage: React.FC = () => {
 
     // --- Действия Workflow ---
 
-    const handleAssignAnalyst = async () => {
-        if (!targetDoc || !selectedAnalystId) return;
+    const handleAssignAnalyst = async (analystId: number, days: number) => {
+        if (!targetDoc) return;
         setActionLoading(true);
         try {
-            await api.post(`/psd-analyst/documents/${targetDoc.id}/assign-analyst`, null, {
-                params: {analyst_id: selectedAnalystId, days: deadlineDays}
-            });
+            await psdApi.assignAnalyst(targetDoc.id, analystId, days);
             setAssignDialogOpen(false);
             loadDocuments();
             alert('Аналитик успешно назначен');
@@ -307,7 +221,7 @@ const PsdAnalystPage: React.FC = () => {
         if (!window.confirm('Отправить документ на утверждение директору?')) return;
         setActionLoading(true);
         try {
-            await api.post(`/psd-analyst/documents/${docId}/submit-approval`);
+            await psdApi.submitForApproval(docId);
             await loadDocuments(); // Ждем завершения загрузки
             if (selectedDoc?.id === docId) setSelectedDoc(null);
             setActiveTab(0);
@@ -333,21 +247,21 @@ const PsdAnalystPage: React.FC = () => {
         if (!window.confirm('Вы уверены, что хотите утвердить данный документ? Будет сформирован финальный ZIP-архив.')) return;
         setActionLoading(true);
         try {
-            await api.post(`/psd-analyst/documents/${docId}/approve`);
-            await loadDocuments(); // Ждем завершения загрузки
+            await psdApi.approveDocument(docId);
+            await loadDocuments();
             alert('Документ успешно утвержден');
         } finally {
             setActionLoading(false);
         }
     };
 
-    const handleReject = async () => {
-        if (!targetDoc || !rejectComment) return;
+    const handleReject = async (comment: string) => {
+        if (!targetDoc) return;
         setActionLoading(true);
         try {
-            await api.post(`/psd-analyst/documents/${targetDoc.id}/reject`, {comment: rejectComment});
+            await psdApi.rejectDocument(targetDoc.id, comment);
             setRejectDialogOpen(false);
-            await loadDocuments(); // Ждем завершения загрузки
+            await loadDocuments();
             alert('Документ возвращен на доработку');
         } finally {
             setActionLoading(false);
@@ -358,8 +272,8 @@ const PsdAnalystPage: React.FC = () => {
         if (!window.confirm('Отправить результат анализа в дочернюю организацию?\n\nZIP архив с заключением будет отправлен на callback URL, указанный при загрузке документа.')) return;
         setActionLoading(true);
         try {
-            const res = await api.post(`/psd-analyst/documents/${docId}/send-to-do`);
-            await loadDocuments(); // Ждем завершения загрузки
+            const res = await psdApi.sendToDo(docId);
+            await loadDocuments();
             alert(`✅ Результат успешно отправлен!\n\nCallback URL: ${res.data.callback_url}`);
         } catch (err: unknown) {
             const errorMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -369,13 +283,10 @@ const PsdAnalystPage: React.FC = () => {
         }
     };
 
-    const handleDelegate = async () => {
-        if (!delegateTargetId) return;
+    const handleDelegate = async (toUserId: number, days: number) => {
         setActionLoading(true);
         try {
-            await api.post('/psd-analyst/delegate', null, {
-                params: {to_user_id: delegateTargetId, days: delegateDays}
-            });
+            await psdApi.delegateAuthority(toUserId, days);
             setDelegateDialogOpen(false);
             alert('Полномочия успешно делегированы');
         } finally {
@@ -383,19 +294,22 @@ const PsdAnalystPage: React.FC = () => {
         }
     };
 
+    // Скачивает blob с сервера и сохраняет под именем filename
+    const downloadBlob = (data: Blob, filename: string) => {
+        const url = window.URL.createObjectURL(new Blob([data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+    };
+
     const handleDownloadResultZip = async (docId: number) => {
         try {
-            const response = await api.get(`/psd-analyst/documents/${docId}/download-result`, {
-                responseType: 'blob'
-            });
-            const url = window.URL.createObjectURL(new Blob([response.data]));
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `Analysis_Result_${docId}.zip`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(url);
+            const response = await psdApi.downloadResultZip(docId);
+            downloadBlob(response.data, `Analysis_Result_${docId}.zip`);
         } catch {
             alert('Ошибка при скачивании файла');
         }
@@ -404,7 +318,7 @@ const PsdAnalystPage: React.FC = () => {
     const handleDeleteDocument = async (docId: number) => {
         if (!window.confirm('Вы уверены, что хотите удалить этот проект? Это действие необратимо.')) return;
         try {
-            await api.delete(`/psd-analyst/documents/${docId}`);
+            await psdApi.deleteDocument(docId);
             if (selectedDoc?.id === docId) setSelectedDoc(null);
             loadDocuments();
         } catch {
@@ -416,29 +330,23 @@ const PsdAnalystPage: React.FC = () => {
         if (!selectedDoc) return;
         setParsing(true);
         try {
-            await api.post(`/psd-analyst/documents/${selectedDoc.id}/parse`);
+            await psdApi.parseDocument(selectedDoc.id);
             await loadMatches(selectedDoc.id);
         } finally {
             setParsing(false);
         }
     };
 
-    const handleUploadTest = async () => {
-        if (!selectedFile || !testProjectName) return;
+    const handleUploadTest = async (file: File, projectName: string) => {
         setUploading(true);
         try {
             const formData = new FormData();
-            formData.append('file', selectedFile);
-            formData.append('project_name', testProjectName);
+            formData.append('file', file);
+            formData.append('project_name', projectName);
 
-            const res = await api.post('/psd-analyst/upload-test', formData, {
-                headers: {'Content-Type': 'multipart/form-data'}
-            });
+            const res = await psdApi.uploadTest(formData);
 
             setUploadDialogOpen(false);
-            setTestProjectName('');
-            setSelectedFile(null);
-
             setShowTests(true);
             await loadDocuments();
 
@@ -455,29 +363,50 @@ const PsdAnalystPage: React.FC = () => {
 
     const openEditDialog = async (match: AgskMatch) => {
         const itemId = match.item_id || match.id;
+        let freshItem = match;
         try {
             // Загружаем актуальные данные позиции (включая current_manual_match)
-            const itemRes = await api.get(`/psd-analyst/document-items/${match.document_id}/item/${itemId}`);
-            setEditingMatch({...match, ...itemRes.data});
+            const fresh = await psdApi.fetchDocumentItem(match.document_id!, itemId!);
+            freshItem = {...match, ...fresh};
+            setEditingMatch(freshItem);
         } catch {
             setEditingMatch(match);
         }
         setEditDialogOpen(true);
-        setSearchMode('all');
-        setReestrSearch('');
         setReestrResults([]);
+
+        // Определяем начальный поиск по типу позиции.
+        let initialMode: SearchMode = 'all';
+        let initialQuery = '';
+        if ((freshItem.match_type === 'auto' || freshItem.match_type === 'auto_ktp')
+            && freshItem.code_sn && !(freshItem.current_manual_matches?.length)) {
+            // Авто-совпадение по АГСК: ищем по АГСК-коду чтобы сразу показать список КТП поставщиков
+            initialMode = 'agsk';
+            initialQuery = freshItem.code_sn;
+        } else if (freshItem.match_type === 'suggested' && freshItem.enstru_code && !(freshItem.current_manual_matches?.length)) {
+            // Подсказка из библиотеки — ищем по ЕНСТРУ-коду
+            initialMode = 'all';
+            initialQuery = freshItem.enstru_code;
+        }
+        setSearchMode(initialMode);
+        setReestrSearch(initialQuery);
+
+        // Запускаем поиск сразу, не дожидаясь debounce/useEffect.
+        // ВАЖНО: если у предыдущего открытия диалога было то же значение поиска —
+        // React не пересоздаёт state, useDebounce не срабатывает, useEffect не запускается,
+        // и старый/пустой список результатов остаётся. Поэтому вызываем явно.
+        const minLen = initialMode === 'agsk' ? 3 : 2;
+        if (initialQuery.length >= minLen) {
+            handleSearchReestr(initialQuery, initialMode);
+        }
     };
 
-    const handleSearchReestr = async () => {
+    const handleSearchReestr = async (overrideQuery?: string, overrideMode?: SearchMode) => {
+        const q = overrideQuery ?? debouncedReestrSearch;
+        const m = overrideMode ?? searchMode;
         setReestrLoading(true);
         try {
-            const res = await api.get('/psd-analyst/search-enstru-reestr', {
-                params: {
-                    query: debouncedReestrSearch,
-                    search_mode: searchMode,
-                }
-            });
-            setReestrResults(res.data);
+            setReestrResults(await psdApi.searchEnstruInReestr(q, m));
         } finally {
             setReestrLoading(false);
         }
@@ -492,9 +421,7 @@ const PsdAnalystPage: React.FC = () => {
         }
 
         try {
-            await api.post(`/psd-analyst/document-items/${itemId}/not-in-ktp-registry`, {
-                value: value
-            });
+            await psdApi.setNotInKtpRegistry(itemId, value);
             if (selectedDoc) {
                 loadMatches(selectedDoc.id);
             }
@@ -513,14 +440,13 @@ const PsdAnalystPage: React.FC = () => {
     const loadMatchesLibrary = async () => {
         setMatchesLoading(true);
         try {
-            const res = await api.get('/psd-analyst/matches', {
-                params: {
-                    date_filter: matchDateFilter,
-                    limit: 200,
-                }
+            const data = await psdApi.fetchMatchesLibrary({
+                date_filter: matchDateFilter,
+                skip: (matchesLibraryPage - 1) * LIBRARY_PAGE_SIZE,
+                limit: LIBRARY_PAGE_SIZE,
             });
-            setMatchesLibrary(res.data.items);
-            setMatchesLibraryTotal(res.data.total);
+            setMatchesLibrary(data.items);
+            setMatchesLibraryTotal(data.total);
         } finally {
             setMatchesLoading(false);
         }
@@ -529,7 +455,7 @@ const PsdAnalystPage: React.FC = () => {
     const approveMatch = async (matchId: number) => {
         setApprovingId(matchId);
         try {
-            await api.post(`/psd-analyst/matches/${matchId}/approve`);
+            await psdApi.approveLibraryMatch(matchId);
             setMatchesLibrary(prev => prev.map(m =>
                 m.id === matchId ? {...m, is_approved: true, status: 'approved'} : m
             ));
@@ -544,7 +470,7 @@ const PsdAnalystPage: React.FC = () => {
     const rejectMatch = async (matchId: number) => {
         setApprovingId(matchId);
         try {
-            await api.post(`/psd-analyst/matches/${matchId}/reject`);
+            await psdApi.rejectLibraryMatch(matchId);
             setMatchesLibrary(prev => prev.map(m =>
                 m.id === matchId ? {...m, is_active: false, status: 'rejected'} : m
             ));
@@ -561,22 +487,27 @@ const PsdAnalystPage: React.FC = () => {
         const itemId = editingMatch.item_id || editingMatch.id;
         if (!itemId) return;
         try {
-            await api.post(`/psd-analyst/document-items/${itemId}/save-match`, {
-                enstru_code: item.enstru_code
+            await psdApi.saveSupplierMatch(itemId, {
+                enstru_code: item.enstru_code,
+                ktp_id: item.ktp_id || null,
+                supplier_bin: item.bin || null,
+                supplier_name: item.company || null,
+                supplier_product: item.product || null,
+                dvc_percent: item.dvc_percent || null,
             });
             // Обновляем editingMatch актуальными данными (включая current_manual_matches)
-            const itemRes = await api.get(`/psd-analyst/document-items/${editingMatch.document_id}/item/${itemId}`);
-            setEditingMatch({...editingMatch, ...itemRes.data});
+            const fresh = await psdApi.fetchDocumentItem(editingMatch.document_id!, itemId);
+            setEditingMatch({...editingMatch, ...fresh});
             // Обновляем таблицу
             if (selectedDoc) loadMatches(selectedDoc.id);
-            // Убираем сопоставлённый enstru из результатов поиска
+            // Убираем выбранного поставщика из результатов поиска
             setReestrResults(prev => prev.filter((r: any) => !(r.enstru_code === item.enstru_code && r.ktp_id === item.ktp_id)));
         } catch (err: any) {
             const detail = err?.response?.data?.detail;
             if (err?.response?.status === 409) {
-                alert(`${detail || 'Этот код уже сопоставлен с данной позицией'}`);
+                alert(`${detail || 'Этот поставщик уже выбран для данной позиции'}`);
             } else {
-                alert('Ошибка при сохранении сопоставления');
+                alert('Ошибка при выборе поставщика');
             }
         }
     };
@@ -584,7 +515,7 @@ const PsdAnalystPage: React.FC = () => {
     const deleteMatch = async (matchId: number) => {
         if (!window.confirm('Удалить это сопоставление?')) return;
         try {
-            await api.delete(`/psd-analyst/matches/${matchId}`);
+            await psdApi.deleteLibraryMatch(matchId);
             // Мгновенно убираем из списка локально
             setEditingMatch(prev => prev ? {
                 ...prev,
@@ -604,31 +535,16 @@ const PsdAnalystPage: React.FC = () => {
     const handleExportFullReport = async (docId?: number) => {
         setExportLoading(true);
         try {
-            const response = await api.get('/psd-analyst/export-full-report', {
-                params: {doc_id: docId},
-                responseType: 'blob'
-            });
-
-            const contentDisposition = response.headers['content-disposition'];
+            const response = await psdApi.exportFullReport(docId);
+            // Извлекаем имя файла из Content-Disposition
+            const cd = response.headers['content-disposition'];
             let filename = docId ? `psd_report_doc_${docId}.xlsx` : 'psd_full_report.xlsx';
-
-            if (contentDisposition) {
-                const filenameMatch = contentDisposition.match(/filename="(.+)"/);
-                if (filenameMatch && filenameMatch[1]) {
-                    filename = filenameMatch[1];
-                }
+            if (cd) {
+                const m = cd.match(/filename="(.+)"/);
+                if (m && m[1]) filename = m[1];
             }
-
-            const url = window.URL.createObjectURL(new Blob([response.data]));
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', filename);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(url);
+            downloadBlob(response.data, filename);
         } catch {
-            // console.error('Export failed');
             alert('Ошибка при выгрузке отчета');
         } finally {
             setExportLoading(false);
@@ -638,20 +554,9 @@ const PsdAnalystPage: React.FC = () => {
     const handleDownloadConclusion = async (docId: number) => {
         setDocxLoading(true);
         try {
-            const response = await api.get(`/psd-analyst/documents/${docId}/conclusion`, {
-                responseType: 'blob'
-            });
-
-            const url = window.URL.createObjectURL(new Blob([response.data]));
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `Заключение_ПСД_${docId}.docx`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(url);
+            const response = await psdApi.downloadConclusion(docId);
+            downloadBlob(response.data, `Заключение_ПСД_${docId}.docx`);
         } catch {
-            // console.error('Download conclusion failed');
             alert('Ошибка при генерации заключения');
         } finally {
             setDocxLoading(false);
@@ -662,99 +567,25 @@ const PsdAnalystPage: React.FC = () => {
         if (!selectedDoc) return;
         setSavingComment(true);
         try {
-            await api.post(`/psd-analyst/documents/${selectedDoc.id}/analyst-comment`, {
-                comment: analystComment
-            });
-            // Обновляем локальный документ
+            await psdApi.saveAnalystComment(selectedDoc.id, analystComment);
             setSelectedDoc({...selectedDoc, analyst_comment: analystComment});
             alert('Комментарий сохранен');
         } catch {
-            // console.error('Save comment failed');
             alert('Ошибка при сохранении комментария');
         } finally {
             setSavingComment(false);
         }
     };
 
-    const getMatchTypeStyles = (type: string, notInKtp?: boolean) => {
-        // Если отмечено "нет в реестре КТП" - показываем это (строго проверяем boolean true)
-        if (notInKtp === true) {
-            return {label: 'Нет в реестре КТП', color: 'warning'};
-        }
-        switch (type) {
-            case 'manual_ktp':
-                return {label: 'КТП + Библиотека', color: 'primary'};
-            case 'manual':
-                return {label: 'Библиотека', color: 'success'};
-            case 'auto':
-                return {label: 'Авто', color: 'info'};
-            case 'auto_ktp':
-                return {label: 'КТП', color: 'warning'};
-            default:
-                return {label: '⚠ Не указано', color: 'error'};
-        }
-    };
-
-    const getStatusChip = (status: ExternalDocumentStatus) => {
-        switch (status) {
-            case "NEW":
-                return <Chip label="Новый" size="small" variant="outlined"/>;
-            case "PARSED":
-                return <Chip label="Распарсен" size="small" color="info" variant="outlined"/>;
-            case "ASSIGNED_TO_ANALYST":
-                return <Chip label="Назначен" size="small" color="primary" variant="outlined"/>;
-            case "FOR_APPROVAL":
-                return <Chip label="На утверждении" size="small" color="warning"/>;
-            case "APPROVED":
-                return <Chip label="Утвержден" size="small" color="success"/>;
-            case "COMPLETED":
-                return <Chip label="Завершен" size="small" color="success" variant="filled" icon={<CheckCircleIcon/>}/>;
-            case "SENT":
-                return <Chip label="Отправлен в ДО" size="small" color="info" variant="filled" icon={<SendIcon/>}/>;
-            case "REJECTED_BY_DIRECTOR":
-                return <Chip label="На доработке" size="small" color="error" variant="outlined" icon={<RejectIcon/>}/>;
-            case "ERROR":
-                return <Chip label="Ошибка" size="small" color="error"/>;
-            default:
-                return <Chip label={status} size="small" variant="outlined"/>;
-        }
-    };
-
-    const getDvcColor = (percent: number) => {
-        if (percent === 100) return 'success';
-        if (percent >= 70) return 'warning';
-        return 'default';
-    };
-
-    const ClassifierText: React.FC<{
-        label: string;
-        codes?: string[];
-        names?: string[];
-        highlight?: string;
-    }> = ({label, codes = [], names = [], highlight = ''}) => {
-        if (!codes.length) return null;
-        return (
-            <Typography sx={{fontSize: '0.65rem', color: '#546e7a', lineHeight: 1.5, mb: 0.25}}>
-                <Box component="span" sx={{fontWeight: 'bold', color: '#78909c', textTransform: 'uppercase', letterSpacing: 0.3}}>{label}: </Box>
-                {codes.map((code, i) => {
-                    const name = names[i] || '';
-                    return (
-                        <Box component="span" key={`${code}-${i}`}>
-                            <Box component="span" sx={{fontWeight: 'bold'}}>
-                                <Highlight text={code} search={highlight}/>
-                            </Box>
-                            {name && <> — <Highlight text={name} search={highlight}/></>}
-                            {i < codes.length - 1 && (
-                                <Box component="span" sx={{fontWeight: 'bold', color: '#90a4ae', mx: 0.5}}>|</Box>
-                            )}
-                        </Box>
-                    );
-                })}
-            </Typography>
-        );
-    };
+    // getItemStatus / getStatusChip / getDvcColor / ClassifierText / Highlight
+    // вынесены в ./psd-analyst/utils.tsx и ./psd-analyst/components.tsx
 
     const currentSearchTab = SEARCH_TABS.find(t => t.mode === searchMode)!;
+
+    // Диалог в режиме «только просмотр»: для auto/auto_ktp АГСК прямо сопоставлен
+    // с реестром КТП — аналитик не выбирает поставщика, а только смотрит результат.
+    const isReadOnlyDialog =
+        editingMatch?.match_type === 'auto' || editingMatch?.match_type === 'auto_ktp';
 
     return (
         <Box sx={{bgcolor: '#f5f7f9', minHeight: '100vh'}}>
@@ -1376,29 +1207,41 @@ const PsdAnalystPage: React.FC = () => {
                                     />
                                     <Button size="small" variant={onlyUnmatched ? 'contained' : 'outlined'}
                                             color="error"
+                                            startIcon={onlyUnmatched ? <CloseIcon fontSize="small"/> : undefined}
                                             onClick={() => {
                                                 setOnlyUnmatched(!onlyUnmatched);
                                                 setPage(1);
-                                            }}>
-                                        Несопоставленные
+                                            }}
+                                            sx={{textTransform: 'none'}}>
+                                        {onlyUnmatched ? 'Сбросить фильтр' : 'Несопоставленные'}
                                     </Button>
 
                                     {/* Индикатор прогресса обработки */}
-                                    {matches.length > 0 && (
-                                        <Chip
-                                            size="small"
-                                            color={matches.filter(m => m.enstru_code || m.not_in_ktp_registry).length === matches.length ? 'success' : 'warning'}
-                                            label={`${matches.filter(m =>
-                                                m.enstru_code ||
-                                                m.not_in_ktp_registry ||
-                                                m.item_type === 'WORKS' ||
-                                                m.item_type === 'SERVICES' ||
-                                                m.item_type === 'OTHER' ||
-                                                m.item_type === 'BALANCE'
-                                            ).length}/${matches.length} обработано`}
-                                            sx={{fontSize: '0.7rem'}}
-                                        />
-                                    )}
+                                    {matches.length > 0 && (() => {
+                                        // "Обработана" = есть активный выбор поставщика ИЛИ авто (АГСК в КТП)
+                                        // ИЛИ не в реестре КТП ИЛИ не ТОВАР
+                                        const isDone = (m: AgskMatch) =>
+                                            (m.current_manual_matches?.some(mm => mm.status === 'active' || (mm.status as string) === 'approved')) ||
+                                            m.match_type === 'auto' ||
+                                            m.match_type === 'auto_ktp' ||
+                                            m.match_type === 'manual' ||
+                                            m.not_in_ktp_registry ||
+                                            m.item_type === 'WORKS' ||
+                                            m.item_type === 'SERVICES' ||
+                                            m.item_type === 'OTHER' ||
+                                            m.item_type === 'BALANCE';
+                                        const doneCount = matches.filter(isDone).length;
+                                        return (
+                                            <Box sx={{display: 'flex', gap: 0.5, alignItems: 'center'}}>
+                                                <Chip
+                                                    size="small"
+                                                    color={doneCount === matches.length ? 'success' : 'warning'}
+                                                    label={`${doneCount}/${matches.length} обработано`}
+                                                    sx={{fontSize: '0.7rem'}}
+                                                />
+                                            </Box>
+                                        );
+                                    })()}
 
                                     <Box sx={{flexGrow: 1}}/>
 
@@ -1429,22 +1272,31 @@ const PsdAnalystPage: React.FC = () => {
                                         </Button>
 
                                         {!selectedDoc.is_test && (selectedDoc.status === 'ASSIGNED_TO_ANALYST' || selectedDoc.status === 'REJECTED_BY_DIRECTOR') && (
-                                            <Tooltip title={pendingMatchCount > 0 ? `Ожидают утверждения менеджером: ${pendingMatchCount} сопоставлений` : ''}>
-                                                <span>
-                                                    <Button
-                                                        size="small"
-                                                        variant="contained"
-                                                        color={pendingMatchCount > 0 ? 'warning' : 'primary'}
-                                                        startIcon={actionLoading ?
-                                                            <CircularProgress size={16} color="inherit"/> : <SendIcon/>}
-                                                        disabled={actionLoading || pendingMatchCount > 0}
-                                                        onClick={() => handleSubmitForApproval(selectedDoc.id)}
-                                                        sx={{textTransform: 'none'}}
-                                                    >
-                                                        {pendingMatchCount > 0 ? `⏳ ${pendingMatchCount} ожидают` : 'На утверждение'}
-                                                    </Button>
-                                                </span>
-                                            </Tooltip>
+                                            <Box sx={{display: 'flex', alignItems: 'center', gap: 0.5}}>
+                                                {pendingMatchCount > 0 && (
+                                                    <Tooltip title={`${pendingMatchCount} пар АГСК→ЕНСТРУ ожидают утверждения в библиотеке (не блокирует отправку)`}>
+                                                        <Chip
+                                                            size="small"
+                                                            label={`📚 ${pendingMatchCount}`}
+                                                            color="info"
+                                                            variant="outlined"
+                                                            sx={{fontSize: '0.7rem', height: 22, cursor: 'help'}}
+                                                        />
+                                                    </Tooltip>
+                                                )}
+                                                <Button
+                                                    size="small"
+                                                    variant="contained"
+                                                    color="primary"
+                                                    startIcon={actionLoading ?
+                                                        <CircularProgress size={16} color="inherit"/> : <SendIcon/>}
+                                                    disabled={actionLoading}
+                                                    onClick={() => handleSubmitForApproval(selectedDoc.id)}
+                                                    sx={{textTransform: 'none'}}
+                                                >
+                                                    На утверждение
+                                                </Button>
+                                            </Box>
                                         )}
 
                                         {isDirector && selectedDoc.status === 'FOR_APPROVAL' && (
@@ -1490,6 +1342,41 @@ const PsdAnalystPage: React.FC = () => {
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
+                                    {matches.length === 0 && !listLoading && (
+                                        <TableRow>
+                                            <TableCell colSpan={11} align="center" sx={{py: 6, borderBottom: 'none'}}>
+                                                {onlyUnmatched ? (
+                                                    <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5}}>
+                                                        <CheckCircleIcon sx={{fontSize: 48, color: 'success.main'}}/>
+                                                        <Typography variant="subtitle1" fontWeight={600} color="text.primary">
+                                                            Все позиции обработаны
+                                                        </Typography>
+                                                        <Typography variant="body2" color="text.secondary" sx={{maxWidth: 460}}>
+                                                            Нет несопоставленных позиций. Авто-сопоставленные и выбранные аналитиком позиции скрыты фильтром.
+                                                        </Typography>
+                                                        <Button
+                                                            variant="contained" size="small"
+                                                            onClick={() => { setOnlyUnmatched(false); setPage(1); }}
+                                                            sx={{mt: 1, textTransform: 'none'}}
+                                                        >
+                                                            Показать все позиции
+                                                        </Button>
+                                                    </Box>
+                                                ) : debouncedAgskSearch ? (
+                                                    <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1}}>
+                                                        <SearchIcon sx={{fontSize: 40, color: 'text.disabled'}}/>
+                                                        <Typography variant="body2" color="text.secondary">
+                                                            По запросу «{debouncedAgskSearch}» ничего не найдено
+                                                        </Typography>
+                                                    </Box>
+                                                ) : (
+                                                    <Typography variant="body2" color="text.secondary" sx={{fontStyle: 'italic'}}>
+                                                        В этом документе нет позиций
+                                                    </Typography>
+                                                )}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                     {matches.map(m => (
                                         <TableRow key={m.item_id} hover>
                                             <TableCell>{m.position_number}</TableCell>
@@ -1517,12 +1404,14 @@ const PsdAnalystPage: React.FC = () => {
                                                         m.current_manual_matches!.map(mm => (
                                                             <Box key={mm.id} sx={{display: 'flex', alignItems: 'center', gap: 0.5}}>
                                                                 <Typography sx={{fontSize: '0.8rem', fontWeight: 'bold',
-                                                                    color: mm.status === 'approved' ? 'primary.main' : '#ed6c02'}}>
+                                                                    color: (mm.status === 'active' || (mm.status as string) === 'approved') ? 'primary.main' : '#ed6c02'}}>
                                                                     {mm.enstru_code}
                                                                 </Typography>
-                                                                {mm.status === 'approved'
+                                                                {(mm.status === 'active' || (mm.status as string) === 'approved')
                                                                     ? <Chip label="✓" size="small" color="success" sx={{height: 16, fontSize: '0.6rem', '& .MuiChip-label': {px: 0.5}}}/>
-                                                                    : <Chip label="⏳" size="small" color="warning" sx={{height: 16, fontSize: '0.6rem', '& .MuiChip-label': {px: 0.5}}}/>
+                                                                    : mm.status === 'rejected'
+                                                                        ? <Chip label="✗" size="small" color="error" sx={{height: 16, fontSize: '0.6rem', '& .MuiChip-label': {px: 0.5}}}/>
+                                                                        : <Chip label="⏳" size="small" color="warning" sx={{height: 16, fontSize: '0.6rem', '& .MuiChip-label': {px: 0.5}}}/>
                                                                 }
                                                             </Box>
                                                         ))
@@ -1558,14 +1447,17 @@ const PsdAnalystPage: React.FC = () => {
                                                 {m.total_amount?.toLocaleString('ru-RU', {maximumFractionDigits: 2})}
                                             </TableCell>
                                             <TableCell>
-                                                <Chip
-                                                    label={getMatchTypeStyles(m.match_type, m.not_in_ktp_registry).label}
-                                                    color={getMatchTypeStyles(m.match_type, m.not_in_ktp_registry).color as any}
-                                                    icon={m.match_type === 'manual_ktp' && !m.not_in_ktp_registry ?
-                                                        <LibraryIcon sx={{fontSize: '12px !important'}}/> : undefined}
-                                                    size="small"
-                                                    sx={{fontSize: '0.7rem'}}
-                                                />
+                                                {(() => {
+                                                    const st = getItemStatus(m);
+                                                    return (
+                                                        <Chip
+                                                            label={st.label}
+                                                            color={st.color}
+                                                            size="small"
+                                                            sx={{fontSize: '0.7rem'}}
+                                                        />
+                                                    );
+                                                })()}
                                             </TableCell>
                                             <TableCell>
                                                 {(() => {
@@ -1591,10 +1483,21 @@ const PsdAnalystPage: React.FC = () => {
                                             </TableCell>
                                             <TableCell align="right">
                                                 {(!m.item_type || m.item_type === 'GOODS') ? (
-                                                    <IconButton size="small" onClick={() => openEditDialog(m)}
-                                                                sx={{bgcolor: '#f0f4f8'}}>
-                                                        <EditIcon fontSize="small"/>
-                                                    </IconButton>
+                                                    (() => {
+                                                        // Для auto/auto_ktp кнопка — это ПРОСМОТР,
+                                                        // выбор поставщика недоступен
+                                                        const isAuto = m.match_type === 'auto' || m.match_type === 'auto_ktp';
+                                                        return (
+                                                            <Tooltip title={isAuto ? 'Просмотр (авто-сопоставление)' : 'Выбрать поставщика'}>
+                                                                <IconButton size="small" onClick={() => openEditDialog(m)}
+                                                                            sx={{bgcolor: isAuto ? '#e8f5e9' : '#f0f4f8'}}>
+                                                                    {isAuto
+                                                                        ? <VisibilityIcon fontSize="small" sx={{color: 'success.main'}}/>
+                                                                        : <EditIcon fontSize="small"/>}
+                                                                </IconButton>
+                                                            </Tooltip>
+                                                        );
+                                                    })()
                                                 ) : (
                                                     <Typography variant="caption" color="text.disabled"
                                                                 sx={{pr: 1}}>—</Typography>
@@ -1676,13 +1579,16 @@ const PsdAnalystPage: React.FC = () => {
                             </Typography>
                             <Divider orientation="vertical" flexItem/>
                             <ToggleButtonGroup size="small" value={matchDateFilter} exclusive
-                                onChange={(_, v) => v && setMatchDateFilter(v)} sx={{bgcolor: 'white'}}>
+                                onChange={(_, v) => { if (v) { setMatchDateFilter(v); setMatchesLibraryPage(1); } }} sx={{bgcolor: 'white'}}>
                                 <ToggleButton value="all" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Все</ToggleButton>
                                 <ToggleButton value="today" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Сегодня</ToggleButton>
                             </ToggleButtonGroup>
                             <Box sx={{flexGrow: 1}}/>
                             <Typography variant="caption" color="text.secondary">
-                                Всего: {matchesLibraryTotal}
+                                Всего: <b>{matchesLibraryTotal}</b>
+                                {matchesLibraryTotal > LIBRARY_PAGE_SIZE && (
+                                    <> · стр. {matchesLibraryPage} из {Math.ceil(matchesLibraryTotal / LIBRARY_PAGE_SIZE)}</>
+                                )}
                             </Typography>
                             <Button size="small" variant="outlined" startIcon={<RefreshIcon/>}
                                     onClick={loadMatchesLibrary} disabled={matchesLoading} sx={{textTransform: 'none'}}>
@@ -1697,9 +1603,7 @@ const PsdAnalystPage: React.FC = () => {
                                     <TableRow>
                                         <TableCell sx={{fontWeight: 'bold'}}>Статус</TableCell>
                                         <TableCell sx={{fontWeight: 'bold'}}>АГСК</TableCell>
-                                        <TableCell sx={{fontWeight: 'bold'}}>ЕНС ТРУ</TableCell>
-                                        <TableCell sx={{fontWeight: 'bold'}}>Источник</TableCell>
-                                        <TableCell sx={{fontWeight: 'bold'}}>Позиция</TableCell>
+                                        <TableCell sx={{fontWeight: 'bold'}}>ЕНСТРУ</TableCell>
                                         <TableCell sx={{fontWeight: 'bold'}}>Аналитик</TableCell>
                                         <TableCell sx={{fontWeight: 'bold'}}>Дата</TableCell>
                                         {isAnalystManager && (
@@ -1710,7 +1614,7 @@ const PsdAnalystPage: React.FC = () => {
                                 <TableBody>
                                     {matchesLibrary.length === 0 && !matchesLoading && (
                                         <TableRow>
-                                            <TableCell colSpan={isAnalystManager ? 8 : 7} align="center">
+                                            <TableCell colSpan={isAnalystManager ? 6 : 5} align="center">
                                                 <Typography variant="caption" color="text.secondary" sx={{py: 3, display: 'block'}}>
                                                     Нет сопоставлений
                                                 </Typography>
@@ -1731,21 +1635,35 @@ const PsdAnalystPage: React.FC = () => {
                                                     sx={{fontSize: '0.65rem', height: 20}}
                                                 />
                                             </TableCell>
-                                            <TableCell sx={{fontFamily: 'monospace', fontSize: '0.8rem'}}>{m.agsk_code || '—'}</TableCell>
-                                            <TableCell sx={{fontWeight: 'bold', color: 'primary.main'}}>{m.enstru_code}</TableCell>
-                                            <TableCell>
-                                                <Chip
-                                                    size="small"
-                                                    label={m.doc_id ? 'ПСД' : 'Общая'}
-                                                    color={m.doc_id ? 'info' : 'default'}
-                                                    variant="outlined"
-                                                    sx={{fontSize: '0.6rem', height: 18}}
-                                                />
+                                            <TableCell sx={{maxWidth: 220}}>
+                                                <Typography sx={{fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 'bold', color: '#1565c0'}}>
+                                                    {m.agsk_code || '—'}
+                                                </Typography>
+                                                {m.agsk_full_name && (
+                                                    <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.3, mt: 0.25}}>
+                                                        {m.agsk_full_name}
+                                                    </Typography>
+                                                )}
                                             </TableCell>
-                                            <TableCell sx={{maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
-                                                <Tooltip title={m.item_name || '—'}>
-                                                    <Typography variant="caption">{m.item_name || '—'}</Typography>
-                                                </Tooltip>
+                                            <TableCell sx={{maxWidth: 280}}>
+                                                <Typography sx={{fontSize: '0.8rem', fontWeight: 'bold', color: 'primary.main'}}>
+                                                    {m.enstru_code}
+                                                </Typography>
+                                                {m.enstru_name_rus && (
+                                                    <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.3, mt: 0.25}}>
+                                                        {m.enstru_name_rus}
+                                                    </Typography>
+                                                )}
+                                                {m.enstru_detail_rus && (
+                                                    <Typography variant="caption" color="text.disabled" sx={{display: 'block', lineHeight: 1.3, fontStyle: 'italic'}}>
+                                                        {m.enstru_detail_rus}
+                                                    </Typography>
+                                                )}
+                                                {m.enstru_standard && (
+                                                    <Typography variant="caption" sx={{display: 'block', color: '#78909c', fontSize: '0.6rem'}}>
+                                                        {m.enstru_standard}
+                                                    </Typography>
+                                                )}
                                             </TableCell>
                                             <TableCell>
                                                 <Typography variant="caption">{m.analyst_name}</Typography>
@@ -1757,7 +1675,7 @@ const PsdAnalystPage: React.FC = () => {
                                             </TableCell>
                                             <TableCell>
                                                 <Typography variant="caption" color="text.secondary">
-                                                    {m.matched_at ? new Date(m.matched_at).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'}
+                                                    {m.created_at ? new Date(m.created_at).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'}
                                                 </Typography>
                                             </TableCell>
                                             {isAnalystManager && (
@@ -1793,201 +1711,74 @@ const PsdAnalystPage: React.FC = () => {
                                 </TableBody>
                             </Table>
                         </TableContainer>
+
+                        {/* Пагинация */}
+                        {matchesLibraryTotal > LIBRARY_PAGE_SIZE && (
+                            <Box sx={{display: 'flex', justifyContent: 'center', mt: 2}}>
+                                <Pagination
+                                    count={Math.ceil(matchesLibraryTotal / LIBRARY_PAGE_SIZE)}
+                                    page={matchesLibraryPage}
+                                    onChange={(_, p) => setMatchesLibraryPage(p)}
+                                    color="primary"
+                                    size="small"
+                                    showFirstButton
+                                    showLastButton
+                                    disabled={matchesLoading}
+                                />
+                            </Box>
+                        )}
                     </Box>
                 )}
 
                 {/* --- ДИАЛОГИ ДИРЕКТОРА --- */}
-
-                {/* Назначение аналитика */}
-                <Dialog open={assignDialogOpen} onClose={() => !actionLoading && setAssignDialogOpen(false)}
-                        maxWidth="xs" fullWidth>
-                    <DialogTitle sx={{fontWeight: 'bold'}}>Назначить аналитика</DialogTitle>
-                    <DialogContent>
-                        <Stack spacing={3} sx={{mt: 1}}>
-                            <FormControl fullWidth size="small">
-                                <InputLabel>Выберите аналитика</InputLabel>
-                                <Select
-                                    value={selectedAnalystId}
-                                    label="Выберите аналитика"
-                                    onChange={(e) => setSelectedAnalystId(e.target.value as number)}
-                                >
-                                    {analysts.map(a => (
-                                        <MenuItem key={a.id} value={a.id}>{a.full_name}</MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                            <TextField
-                                fullWidth
-                                label="Срок выполнения (раб. дней)"
-                                type="number"
-                                size="small"
-                                value={deadlineDays}
-                                onChange={(e) => {
-                                    const value = Number(e.target.value);
-                                    if (value > 10) {
-                                        setDeadlineDays(10);
-                                    } else if (value < 1) {
-                                        setDeadlineDays(1);
-                                    } else {
-                                        setDeadlineDays(value);
-                                    }
-                                }}
-                                inputProps={{min: 1, max: 10}}
-                                helperText={deadlineDays >= 10 ? "Максимум 10 рабочих дней" : ""}
-                                error={deadlineDays > 10}
-                            />
-                        </Stack>
-                    </DialogContent>
-                    <DialogActions sx={{p: 2}}>
-                        <Button onClick={() => setAssignDialogOpen(false)}>Отмена</Button>
-                        <Button
-                            variant="contained"
-                            onClick={handleAssignAnalyst}
-                            disabled={actionLoading || !selectedAnalystId}
-                            startIcon={actionLoading && <CircularProgress size={16} color="inherit"/>}
-                        >
-                            Назначить
-                        </Button>
-                    </DialogActions>
-                </Dialog>
-
-                {/* Возврат на доработку */}
-                <Dialog open={rejectDialogOpen} onClose={() => !actionLoading && setRejectDialogOpen(false)}
-                        maxWidth="sm" fullWidth>
-                    <DialogTitle sx={{fontWeight: 'bold', color: 'error.main'}}>Вернуть на доработку</DialogTitle>
-                    <DialogContent>
-                        <Typography variant="body2" sx={{mb: 2}}>
-                            Укажите причину возврата или необходимые исправления. Аналитик увидит этот комментарий.
-                        </Typography>
-                        <TextField
-                            fullWidth
-                            multiline
-                            rows={4}
-                            label="Комментарий аналитику"
-                            value={rejectComment}
-                            onChange={(e) => setRejectComment(e.target.value)}
-                            placeholder="Напр. Необходимо уточнить сопоставление по позициям..."
-                        />
-                    </DialogContent>
-                    <DialogActions sx={{p: 2}}>
-                        <Button onClick={() => setRejectDialogOpen(false)}>Отмена</Button>
-                        <Button
-                            variant="contained"
-                            color="error"
-                            onClick={handleReject}
-                            disabled={actionLoading || !rejectComment}
-                            startIcon={actionLoading && <CircularProgress size={16} color="inherit"/>}
-                        >
-                            Вернуть аналитику
-                        </Button>
-                    </DialogActions>
-                </Dialog>
-
-                {/* Делегирование полномочий */}
-                <Dialog open={delegateDialogOpen} onClose={() => !actionLoading && setDelegateDialogOpen(false)}
-                        maxWidth="xs" fullWidth>
-                    <DialogTitle sx={{fontWeight: 'bold'}}>Делегировать полномочия</DialogTitle>
-                    <DialogContent>
-                        <Typography variant="caption" sx={{mb: 2, display: 'block'}}>
-                            Временно передайте права директора выбранному аналитику на период отпуска.
-                        </Typography>
-                        <Stack spacing={3} sx={{mt: 1}}>
-                            <FormControl fullWidth size="small">
-                                <InputLabel>Кому передать права</InputLabel>
-                                <Select
-                                    value={delegateTargetId}
-                                    label="Кому передать права"
-                                    onChange={(e) => setDelegateTargetId(e.target.value as number)}
-                                >
-                                    {analysts.map(a => (
-                                        <MenuItem key={a.id} value={a.id}>{a.full_name}</MenuItem>
-                                    ))}
-                                </Select>
-                            </FormControl>
-                            <TextField
-                                fullWidth
-                                label="Срок делегирования (календ. дней)"
-                                type="number"
-                                size="small"
-                                value={delegateDays}
-                                onChange={(e) => setDelegateDays(Number(e.target.value))}
-                            />
-                        </Stack>
-                    </DialogContent>
-                    <DialogActions sx={{p: 2}}>
-                        <Button onClick={() => setDelegateDialogOpen(false)}>Отмена</Button>
-                        <Button
-                            variant="contained"
-                            onClick={handleDelegate}
-                            disabled={actionLoading || !delegateTargetId}
-                            startIcon={actionLoading && <CircularProgress size={16} color="inherit"/>}
-                        >
-                            Подтвердить
-                        </Button>
-                    </DialogActions>
-                </Dialog>
-
-                {/* ДИАЛОГ ЗАГРУЗКИ ТЕСТА */}
-                <Dialog open={uploadDialogOpen} onClose={() => !uploading && setUploadDialogOpen(false)} maxWidth="xs"
-                        fullWidth>
-                    <DialogTitle sx={{fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1}}>
-                        <ScienceIcon color="warning"/>
-                        Новый тестовый проект
-                    </DialogTitle>
-                    <DialogContent>
-                        <Typography variant="caption" color="text.secondary" sx={{mb: 2, display: 'block'}}>
-                            Тестовый проект создается для личного анализа. Библиотека сопоставлений будет пополняться
-                            как обычно.
-                        </Typography>
-                        <TextField
-                            fullWidth
-                            label="Название проекта"
-                            placeholder="Напр. Анализ ПСД школы..."
-                            value={testProjectName}
-                            onChange={(e) => setTestProjectName(e.target.value)}
-                            sx={{mb: 3, mt: 1}}
-                            size="small"
-                        />
-
-                        <Button
-                            component="label"
-                            variant="outlined"
-                            fullWidth
-                            startIcon={<UploadIcon/>}
-                            sx={{py: 2, borderStyle: 'dashed'}}
-                        >
-                            {selectedFile ? selectedFile.name : 'Выбрать файл .kenml / .zip'}
-                            <input
-                                type="file"
-                                hidden
-                                accept=".kenml,.zip"
-                                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                            />
-                        </Button>
-                    </DialogContent>
-                    <DialogActions sx={{p: 2}}>
-                        <Button onClick={() => setUploadDialogOpen(false)} disabled={uploading}>Отмена</Button>
-                        <Button
-                            variant="contained"
-                            color="warning"
-                            onClick={handleUploadTest}
-                            disabled={uploading || !selectedFile || !testProjectName}
-                            startIcon={uploading && <CircularProgress size={16} color="inherit"/>}
-                        >
-                            {uploading ? 'Загрузка...' : 'Создать'}
-                        </Button>
-                    </DialogActions>
-                </Dialog>
+                <AssignDialog
+                    open={assignDialogOpen}
+                    onClose={() => setAssignDialogOpen(false)}
+                    analysts={analysts}
+                    onSubmit={handleAssignAnalyst}
+                    loading={actionLoading}
+                />
+                <RejectDialog
+                    open={rejectDialogOpen}
+                    onClose={() => setRejectDialogOpen(false)}
+                    onSubmit={handleReject}
+                    loading={actionLoading}
+                />
+                <DelegateDialog
+                    open={delegateDialogOpen}
+                    onClose={() => setDelegateDialogOpen(false)}
+                    analysts={analysts}
+                    onSubmit={handleDelegate}
+                    loading={actionLoading}
+                />
+                <UploadDialog
+                    open={uploadDialogOpen}
+                    onClose={() => setUploadDialogOpen(false)}
+                    onSubmit={handleUploadTest}
+                    loading={uploading}
+                />
 
                 <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)}
                         maxWidth="xl" fullWidth
                         PaperProps={{sx: {height: '85vh', borderRadius: 2, overflow: 'hidden'}}}>
 
+                    {/* Read-only режим: auto/auto_ktp — АГСК напрямую сопоставлен с реестром КТП,
+                        ручной выбор поставщика не нужен, аналитик только смотрит результат. */}
                     <DialogTitle sx={{
                         borderBottom: '1px solid #eee', py: 1.5, px: 2,
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        bgcolor: (editingMatch?.match_type === 'auto' || editingMatch?.match_type === 'auto_ktp') ? '#e8f5e9' : 'inherit',
                     }}>
-                        <Box sx={{minWidth: 0, flex: 1}}>
+                        <Box sx={{minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 1}}>
+                            {(editingMatch?.match_type === 'auto' || editingMatch?.match_type === 'auto_ktp') && (
+                                <Chip
+                                    icon={<VisibilityIcon sx={{fontSize: 14}}/>}
+                                    label="Просмотр (авто)"
+                                    size="small"
+                                    color="success"
+                                    sx={{fontSize: '0.7rem', height: 22, fontWeight: 'bold'}}
+                                />
+                            )}
                             <Typography variant="subtitle1" fontWeight="bold" color="primary">
                                 {editingMatch?.name} — {editingMatch?.code_sn}
                             </Typography>
@@ -2012,69 +1803,85 @@ const PsdAnalystPage: React.FC = () => {
                                         </Typography>
                                     </Box>
 
-                                    {/* Отметка аналитика - Нет в реестре КТП */}
-                                    <Box sx={{p: 1.5, borderBottom: '1px solid #e0e0e0', bgcolor: '#fff3e0'}}>
-                                        <FormControlLabel
-                                            control={
-                                                <Switch
-                                                    size="small"
-                                                    checked={editingMatch?.not_in_ktp_registry || false}
-                                                    onChange={(e) => {
-                                                        const id = editingMatch?.item_id || editingMatch?.id;
-                                                        if (id) saveNotInKtpRegistry(id, e.target.checked);
-                                                    }}
-                                                    color="warning"
-                                                />
-                                            }
-                                            label={
-                                                <Typography variant="caption"
-                                                            color={editingMatch?.not_in_ktp_registry ? 'warning.main' : 'text.secondary'}>
-                                                    Нет в реестре КТП
+                                    {/* Отметка аналитика - Нет в реестре КТП (скрыта в режиме просмотра) */}
+                                    {!isReadOnlyDialog && (
+                                        <Box sx={{p: 1.5, borderBottom: '1px solid #e0e0e0', bgcolor: '#fff3e0'}}>
+                                            <FormControlLabel
+                                                control={
+                                                    <Switch
+                                                        size="small"
+                                                        checked={editingMatch?.not_in_ktp_registry || false}
+                                                        onChange={(e) => {
+                                                            const id = editingMatch?.item_id || editingMatch?.id;
+                                                            if (id) saveNotInKtpRegistry(id, e.target.checked);
+                                                        }}
+                                                        color="warning"
+                                                    />
+                                                }
+                                                label={
+                                                    <Typography variant="caption"
+                                                                color={editingMatch?.not_in_ktp_registry ? 'warning.main' : 'text.secondary'}>
+                                                        Нет в реестре КТП
+                                                    </Typography>
+                                                }
+                                            />
+                                            {editingMatch?.not_in_ktp_registry && (
+                                                <Typography variant="caption" color="text.secondary"
+                                                            sx={{display: 'block', mt: 0.5, fontStyle: 'italic'}}>
+                                                    Сопоставление сброшено
                                                 </Typography>
-                                            }
-                                        />
-                                        {editingMatch?.not_in_ktp_registry && (
-                                            <Typography variant="caption" color="text.secondary"
-                                                        sx={{display: 'block', mt: 0.5, fontStyle: 'italic'}}>
-                                                Сопоставление сброшено
-                                            </Typography>
-                                        )}
-                                    </Box>
+                                            )}
+                                        </Box>
+                                    )}
 
                                     <Box sx={{flexGrow: 1, overflowY: 'auto', p: 1.5}}>
-                                        {/* Автоматическое сопоставление (из базы) */}
+                                        {/* Подсказка из библиотеки / авто — нет выбора поставщика */}
                                         {editingMatch?.enstru_code && !(editingMatch?.current_manual_matches?.length) && (
-                                            <Paper elevation={0} sx={{p: 1.5, mb: 1.5, border: '1px solid #c8e6c9', borderRadius: 2, bgcolor: '#f1f8e9'}}>
+                                            <Paper elevation={0} sx={{
+                                                p: 1.5, mb: 1.5,
+                                                border: editingMatch.match_type === 'auto' || editingMatch.match_type === 'auto_ktp'
+                                                    ? '1px solid #90caf9' : '1px solid #90caf9',
+                                                borderRadius: 2,
+                                                bgcolor: editingMatch.match_type === 'auto' || editingMatch.match_type === 'auto_ktp'
+                                                    ? '#e8eaf6' : '#e3f2fd',
+                                            }}>
                                                 <Box sx={{display: 'flex', alignItems: 'center', gap: 1, mb: 0.5}}>
-                                                    <Chip label="Авто" size="small" color="info" sx={{height: 18, fontSize: '0.6rem'}}/>
+                                                    <Chip
+                                                        label={editingMatch.match_type === 'auto' || editingMatch.match_type === 'auto_ktp'
+                                                            ? '🤖 Авто' : '💡 Подсказка'}
+                                                        size="small"
+                                                        color={editingMatch.match_type === 'auto' || editingMatch.match_type === 'auto_ktp'
+                                                            ? 'primary' : 'info'}
+                                                        sx={{height: 18, fontSize: '0.6rem'}}
+                                                    />
                                                     <Typography variant="caption" fontWeight="bold" color="primary">
                                                         {editingMatch.enstru_code}
                                                     </Typography>
                                                 </Box>
-                                                {editingMatch.match_reason && (
-                                                    <Typography sx={{fontSize: '0.65rem', color: 'text.secondary'}}>
-                                                        {editingMatch.match_reason}
-                                                    </Typography>
-                                                )}
+                                                <Typography sx={{fontSize: '0.65rem', color: 'text.secondary'}}>
+                                                    Поставщик не выбран. Найдите в реестре КТП справа →
+                                                </Typography>
                                             </Paper>
                                         )}
 
-                                        {/* Ручные сопоставления (новая система — несколько) */}
+                                        {/* Выборы поставщиков: active = выбран, pending = ожидает одобрения */}
                                         {(editingMatch?.current_manual_matches?.length ?? 0) > 0 ? (
                                             <Box sx={{display: 'flex', flexDirection: 'column', gap: 0.75, mb: 1}}>
-                                                {editingMatch!.current_manual_matches!.map(mm => (
+                                                {editingMatch!.current_manual_matches!.map(mm => {
+                                                    const isActive = mm.status === 'active' || (mm.status as string) === 'approved';
+                                                    return (
                                                     <Paper key={mm.id} elevation={0} sx={{
                                                         p: 1.25,
-                                                        border: `1px solid ${mm.status === 'approved' ? '#a5d6a7' : '#ffe082'}`,
+                                                        border: isActive ? '1px solid #a5d6a7' : '1px solid #ffe082',
                                                         borderRadius: 2,
-                                                        bgcolor: mm.status === 'approved' ? '#f1f8e9' : '#fffde7',
+                                                        bgcolor: isActive ? '#f1f8e9' : '#fffde7',
                                                         position: 'relative',
                                                     }}>
-                                                        <Box sx={{display: 'flex', alignItems: 'center', gap: 1, pr: mm.status === 'pending' ? 4 : 0}}>
+                                                        <Box sx={{display: 'flex', alignItems: 'center', gap: 1, pr: 4}}>
                                                             <Chip
                                                                 size="small"
-                                                                label={mm.status === 'approved' ? '✅ Утверждено' : '⏳ Ожидает'}
-                                                                color={mm.status === 'approved' ? 'success' : 'warning'}
+                                                                label={isActive ? '✅ Выбран' : '⏳ Ожидает'}
+                                                                color={isActive ? 'success' : 'warning'}
                                                                 sx={{height: 18, fontSize: '0.6rem', flexShrink: 0}}
                                                             />
                                                             <Typography variant="caption" fontWeight="bold" color="primary">
@@ -2086,7 +1893,22 @@ const PsdAnalystPage: React.FC = () => {
                                                                 </Typography>
                                                             )}
                                                         </Box>
-                                                        {mm.status === 'pending' && (
+                                                        {(mm.supplier_name || mm.dvc_percent) && (
+                                                            <Box sx={{mt: 0.5, pl: 0.5}}>
+                                                                {mm.supplier_name && (
+                                                                    <Typography sx={{fontSize: '0.62rem', color: '#334155', lineHeight: 1.3}}>
+                                                                        {mm.supplier_name}
+                                                                    </Typography>
+                                                                )}
+                                                                {mm.dvc_percent != null && (
+                                                                    <Typography sx={{fontSize: '0.6rem', color: '#546e7a'}}>
+                                                                        ДВС: <b>{mm.dvc_percent}%</b>
+                                                                        {mm.supplier_bin && <> · БИН: {mm.supplier_bin}</>}
+                                                                    </Typography>
+                                                                )}
+                                                            </Box>
+                                                        )}
+                                                        {!isReadOnlyDialog && (
                                                             <IconButton
                                                                 size="small" color="error"
                                                                 sx={{position: 'absolute', top: 2, right: 2}}
@@ -2096,11 +1918,12 @@ const PsdAnalystPage: React.FC = () => {
                                                             </IconButton>
                                                         )}
                                                     </Paper>
-                                                ))}
+                                                    );
+                                                })}
                                             </Box>
                                         ) : !editingMatch?.enstru_code && (
                                             <Typography variant="caption" color="text.secondary" sx={{p: 1, display: 'block', fontStyle: 'italic'}}>
-                                                Нет сопоставления. Найдите позицию в реестре КТП и нажмите «Сопоставить».
+                                                Поставщик не выбран. Найдите позицию в реестре КТП справа и нажмите «Выбрать поставщика».
                                             </Typography>
                                         )}
                                     </Box>
@@ -2117,7 +1940,12 @@ const PsdAnalystPage: React.FC = () => {
                                     <Box sx={{bgcolor: 'white', borderBottom: '1px solid #e0e0e0'}}>
                                         <Tabs
                                             value={searchMode}
-                                            onChange={(_, v) => setSearchMode(v as SearchMode)}
+                                            onChange={(_, v) => {
+                                                setSearchMode(v as SearchMode);
+                                                // Сбрасываем поиск только при ручной смене таба пользователем
+                                                setReestrSearch('');
+                                                setReestrResults([]);
+                                            }}
                                             sx={{minHeight: 36, px: 1.5}}
                                             TabIndicatorProps={{style: {height: 2}}}
                                         >
@@ -2194,6 +2022,102 @@ const PsdAnalystPage: React.FC = () => {
                                                         : 'Начните вводить для поиска в реестре КТП'}
                                                 </Typography>
                                             </Box>
+                                        )}
+
+                                        {/* ── Ранее выбиралось для этого АГСК ── */}
+                                        {(editingMatch?.previous_agsk_selections?.length ?? 0) > 0 && (
+                                            <>
+                                                <Typography sx={{
+                                                    fontSize: '0.65rem', fontWeight: 'bold',
+                                                    color: '#1f9a1b', textTransform: 'uppercase', letterSpacing: 0.5,
+                                                }}>
+                                                    🕑 Ранее выбиралось для этого АГСК
+                                                </Typography>
+                                        
+                                                {editingMatch!.previous_agsk_selections!.map((prev, idx) => (
+                                                    <Card key={`prev-${idx}`} elevation={0} sx={{
+                                                        border: prev.ktp_is_active ? '1px solid #9575cd' : '1px solid #ffb74d',
+                                                        borderRadius: 2,
+                                                        width: '100%', boxSizing: 'border-box', flexShrink: 0,
+                                                        bgcolor: prev.ktp_is_active ? '#e8f6e7' : '#fff8e1',
+                                                        transition: 'all 0.2s',
+                                                        ...(prev.ktp_is_active ? {'&:hover': {borderColor: '#2ca21f', boxShadow: '0 2px 8px rgba(0,0,0,0.08)'}} : {opacity: 0.8}),
+                                                    }}>
+                                                        <CardContent sx={{p: 2, '&:last-child': {pb: 2}}}>
+                                                            <Box sx={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5, gap: 1}}>
+                                                                {prev.dvc_percent != null ? (
+                                                                    <Chip
+                                                                        label={`${prev.dvc_percent}% ДВС`} size="small"
+                                                                        color={getDvcColor(prev.dvc_percent)}
+                                                                        variant={prev.dvc_percent === 100 ? 'filled' : 'outlined'}
+                                                                        sx={{height: 24, fontSize: '0.7rem', fontWeight: 'bold', flexShrink: 0}}
+                                                                    />
+                                                                ) : <Box/>}
+                                                                <Box sx={{display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end'}}>
+                                                                    <Chip
+                                                                        label={`×${prev.times_selected}`} size="small"
+                                                                        sx={{height: 18, fontSize: '0.6rem', bgcolor: '#e8f6e7', color: '#159c28', border: '1px solid #ce93d8', '& .MuiChip-label': {px: 0.75}}}
+                                                                    />
+                                                                    {!prev.ktp_is_active && (
+                                                                        <Tooltip title="Поставщик стал неактивным в реестре КТП">
+                                                                            <Chip label="⚠ Не активен" size="small" color="warning"
+                                                                                  sx={{height: 18, fontSize: '0.6rem', '& .MuiChip-label': {px: 0.75}}}/>
+                                                                        </Tooltip>
+                                                                    )}
+                                                                </Box>
+                                                            </Box>
+                                        
+                                                            {prev.supplier_product && (
+                                                                <Typography sx={{fontSize: '0.78rem', fontWeight: 'bold', color: '#1e293b', mb: 0.75, lineHeight: 1.3, wordBreak: 'break-word'}}>
+                                                                    {prev.supplier_product}
+                                                                </Typography>
+                                                            )}
+                                        
+                                                            <Box sx={{mb: 1}}>
+                                                                <Box sx={{display: 'flex', alignItems: 'flex-start', gap: 1}}>
+                                                                    <BusinessIcon sx={{fontSize: 14, color: '#64748b', mt: 0.2, flexShrink: 0}}/>
+                                                                    <Typography sx={{fontSize: '0.72rem', color: '#334155', wordBreak: 'break-word', lineHeight: 1.4}}>
+                                                                        {prev.supplier_name || '—'}
+                                                                    </Typography>
+                                                                </Box>
+                                                            </Box>
+                                        
+                                                            {prev.enstru_code && (
+                                                                <Box sx={{mt: 1, pt: 1, borderTop: '1px solid #e1bee7'}}>
+                                                                    <Typography sx={{fontSize: '0.65rem', color: '#546e7a', lineHeight: 1.5}}>
+                                                                        <Box component="span" sx={{fontWeight: 'bold', color: '#78909c', textTransform: 'uppercase', letterSpacing: 0.3}}>ЕНСТРУ: </Box>
+                                                                        <Box component="span" sx={{fontWeight: 'bold'}}>{prev.enstru_code}</Box>
+                                                                    </Typography>
+                                                                </Box>
+                                                            )}
+                                        
+                                                            {/* В режиме просмотра (auto/auto_ktp) кнопка выбора скрыта */}
+                                                            {isReadOnlyDialog ? null : prev.ktp_is_active && prev.ktp_id ? (
+                                                                <Button size="small" variant="contained" disableElevation fullWidth
+                                                                        onClick={() => saveMatch({
+                                                                            ktp_id: prev.ktp_id!,
+                                                                            enstru_code: prev.enstru_code,
+                                                                            enstru_name: '',
+                                                                            company: prev.supplier_name,
+                                                                            bin: prev.supplier_bin,
+                                                                            product: prev.supplier_product,
+                                                                            dvc_percent: prev.dvc_percent ?? 0,
+                                                                        } as ReestrResult)}
+                                                                        sx={{textTransform: 'none', fontSize: '0.75rem', mt: 1.5, borderRadius: 1.5, py: 0.75, bgcolor: '#23a21f', '&:hover': {bgcolor: '#1b9a26'}}}>
+                                                                    Выбрать снова
+                                                                </Button>
+                                                            ) : (
+                                                                <Button size="small" variant="outlined" disabled fullWidth
+                                                                        sx={{textTransform: 'none', fontSize: '0.75rem', mt: 1.5, borderRadius: 1.5, py: 0.75}}>
+                                                                    Поставщик не активен
+                                                                </Button>
+                                                            )}
+                                                        </CardContent>
+                                                    </Card>
+                                                ))}
+                                        
+                                                <Divider sx={{my: 0.5, borderStyle: 'dashed', borderColor: '#ce93d8'}}/>
+                                            </>
                                         )}
 
                                         {reestrResults.map(r => (
@@ -2307,18 +2231,21 @@ const PsdAnalystPage: React.FC = () => {
                                                         </Box>
                                                     )}
 
-                                                    <Button size="small" variant="contained" disableElevation fullWidth
-                                                            onClick={() => saveMatch(r)}
-                                                            sx={{
-                                                                textTransform: 'none',
-                                                                fontSize: '0.75rem',
-                                                                mt: 1.5,
-                                                                borderRadius: 1.5,
-                                                                py: 0.75,
-                                                                bgcolor: '#1565c0'
-                                                            }}>
-                                                        Сопоставить
-                                                    </Button>
+                                                    {/* В режиме просмотра (auto/auto_ktp) — без кнопки выбора */}
+                                                    {!isReadOnlyDialog && (
+                                                        <Button size="small" variant="contained" disableElevation fullWidth
+                                                                onClick={() => saveMatch(r)}
+                                                                sx={{
+                                                                    textTransform: 'none',
+                                                                    fontSize: '0.75rem',
+                                                                    mt: 1.5,
+                                                                    borderRadius: 1.5,
+                                                                    py: 0.75,
+                                                                    bgcolor: '#1565c0'
+                                                                }}>
+                                                            Выбрать поставщика
+                                                        </Button>
+                                                    )}
                                                 </CardContent>
                                             </Card>
                                         ))}
@@ -2330,10 +2257,21 @@ const PsdAnalystPage: React.FC = () => {
 
                     <DialogActions sx={{px: 2, py: 1, borderTop: '1px solid #e0e0e0'}}>
                         <Box sx={{flexGrow: 1, display: 'flex', alignItems: 'center', gap: 1}}>
-                            <AutoIcon sx={{fontSize: 16, color: '#64748b'}}/>
-                            <Typography sx={{fontSize: '0.65rem', color: '#64748b'}}>
-                                Применяется вариант с минимальным ДВС
-                            </Typography>
+                            {isReadOnlyDialog ? (
+                                <>
+                                    <VisibilityIcon sx={{fontSize: 16, color: 'success.main'}}/>
+                                    <Typography sx={{fontSize: '0.65rem', color: 'success.main', fontWeight: 600}}>
+                                        Авто-сопоставление по АГСК — выбор поставщика не требуется
+                                    </Typography>
+                                </>
+                            ) : (
+                                <>
+                                    <AutoIcon sx={{fontSize: 16, color: '#64748b'}}/>
+                                    <Typography sx={{fontSize: '0.65rem', color: '#64748b'}}>
+                                        Выбранные поставщики попадают в Excel-отчёт после утверждения менеджером
+                                    </Typography>
+                                </>
+                            )}
                         </Box>
                         <Button size="small" onClick={() => setEditDialogOpen(false)} variant="contained"
                                 sx={{textTransform: 'none', fontWeight: 'bold'}}>

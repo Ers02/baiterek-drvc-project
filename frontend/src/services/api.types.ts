@@ -45,11 +45,11 @@ export interface Enstru {
 
 // --- Роли пользователей ---
 export const UserRole = {
-  ADMIN: "admin",
-  DIRECTOR_DRVC: "director_drvc",
-  ANALYST_DRVC: "analyst_drvc",
-  ANALYST_MANAGER: "analyst_manager",
-  USER: "user",
+  ADMIN: "ADMIN",
+  DIRECTOR_DRVC: "DIRECTOR_DRVC",
+  ANALYST_DRVC: "ANALYST_DRVC",
+  ANALYST_MANAGER: "ANALYST_MANAGER",
+  USER: "USER",
 } as const;
 export type UserRole = typeof UserRole[keyof typeof UserRole];
 
@@ -256,28 +256,40 @@ export interface ExternalDocument {
   assigned_user_name?: string; // Добавлено для удобства отображения на фронтенде
 }
 
-// --- Типы для новой системы ручных сопоставлений ---
-export interface ManualMatchStatus {
+// --- Типы для системы выбора поставщиков ---
+
+/** Выбор поставщика аналитиком для конкретной позиции ПСД */
+export interface SupplierSelection {
     id: number;
+    item_id: number;
     enstru_code: string;
-    status: 'pending' | 'approved' | 'rejected';
-    matched_at?: string;
-    approved_at?: string;
+    ktp_id?: number | null;
+    supplier_bin?: string | null;
+    supplier_name?: string | null;
+    supplier_product?: string | null;
+    dvc_percent?: number | null;
+    selected_by?: number;
+    /** pending — ждёт утверждения менеджером; active — утверждено; rejected — отклонено */
+    status: 'pending' | 'active' | 'rejected';
+    is_active?: boolean;
+    matched_at?: string;   // = selected_at
+    approved_at?: string;  // не используется на уровне selection
 }
 
-/** Обратная совместимость — первый элемент массива current_manual_matches */
-export type ManualMatchStatusLegacy = ManualMatchStatus | null;
+/** Обратная совместимость — используется как тип элементов current_manual_matches */
+export type ManualMatchStatus = SupplierSelection;
 
 export interface AgskEnstruMatchItem {
     id: number;
     agsk_code: string;
+    agsk_full_name?: string | null;
     enstru_code: string;
-    doc_id?: number | null;
-    item_id?: number | null;
-    item_name?: string | null;
-    matched_by: number;
+    enstru_name_rus?: string | null;
+    enstru_detail_rus?: string | null;
+    enstru_standard?: string | null;
+    created_by: number;
     analyst_name?: string;
-    matched_at?: string;
+    created_at?: string;
     is_approved: boolean;
     is_active: boolean;
     approved_by?: number | null;

@@ -50,8 +50,9 @@ class AgskEnstruMatcher:
                 "reason": "Утверждённая библиотека сопоставлений АГСК → ЕНСТРУ",
             }
 
-        # 2. Прямой поиск в Реестре КТП (точный код 1 в 1)
+        # 2. Прямой поиск в Реестре КТП (точный код 1 в 1, только активные поставщики)
         ktp_exact = self.db.query(Reestr_KTP).filter(
+            Reestr_KTP.is_active.isnot(False),
             Reestr_KTP.agsk3_codes.contains([q])
         ).first()
 

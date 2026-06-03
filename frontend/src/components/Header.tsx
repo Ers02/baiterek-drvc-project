@@ -28,7 +28,7 @@ export default function Header() {
 
   const handleLogout = () => {
     localStorage.removeItem('token');
-    navigate('/login');
+    navigate('/welcome');
   };
 
   const handleOpenVideoModal = () => {
@@ -40,20 +40,38 @@ export default function Header() {
   };
 
   return (
-    <AppBar position="static" color="primary" elevation={0} sx={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-      <Toolbar sx={{ justifyContent: 'space-between' }}>
+    <AppBar position="static" color="primary" elevation={0}>
+      <Toolbar sx={{ justifyContent: 'space-between', minHeight: 64, px: { xs: 2, md: 3 } }}>
         <Box display="flex" alignItems="center" gap={3}>
-          <Typography
-            variant="h6"
-            fontWeight="800"
-            sx={{ cursor: 'pointer', letterSpacing: '-0.5px' }}
+          <Box
             onClick={() => navigate('/')}
+            sx={{
+              display: 'flex', alignItems: 'center', gap: 1.25,
+              cursor: 'pointer',
+              transition: 'opacity 0.2s',
+              '&:hover': { opacity: 0.9 },
+            }}
           >
-            {t('title')}
-          </Typography>
+            <Box
+              component="img"
+              src="/baiterek.png"
+              alt="Байтерек"
+              sx={{ height: 36, width: 'auto', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.25))' }}
+              onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
+                (e.currentTarget as HTMLImageElement).src = '/baiterek.svg';
+              }}
+            />
+            <Typography
+              variant="h6"
+              fontWeight="700"
+              sx={{ letterSpacing: '-0.3px', lineHeight: 1.2 }}
+            >
+              {t('title')}
+            </Typography>
+          </Box>
 
           {showAnalystMenu && (
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 0.5 }}>
               <Button
                 color="inherit"
                 size="small"
@@ -61,7 +79,11 @@ export default function Header() {
                 onClick={() => navigate('/psd-analyst')}
                 sx={{
                   textTransform: 'none',
-                  bgcolor: location.pathname === '/psd-analyst' ? 'rgba(255,255,255,0.1)' : 'transparent'
+                  fontWeight: 600,
+                  px: 1.5, py: 0.75,
+                  borderRadius: 2,
+                  bgcolor: location.pathname === '/psd-analyst' ? 'rgba(255,255,255,0.18)' : 'transparent',
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.12)' },
                 }}
               >
                 Аналитика
@@ -73,7 +95,11 @@ export default function Header() {
                 onClick={() => navigate('/ktp-search')}
                 sx={{
                   textTransform: 'none',
-                  bgcolor: location.pathname === '/ktp-search' ? 'rgba(255,255,255,0.1)' : 'transparent'
+                  fontWeight: 600,
+                  px: 1.5, py: 0.75,
+                  borderRadius: 2,
+                  bgcolor: location.pathname === '/ktp-search' ? 'rgba(255,255,255,0.18)' : 'transparent',
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.12)' },
                 }}
               >
                 Поиск КТП
@@ -82,22 +108,30 @@ export default function Header() {
           )}
         </Box>
 
-        <Box display="flex" alignItems="center" gap={1.5}>
+        <Box display="flex" alignItems="center" gap={1}>
           <Tooltip title={t('video_instruction') || "Видеоинструкция"}>
-            <IconButton color="inherit" onClick={handleOpenVideoModal} sx={{ bgcolor: 'rgba(255,255,255,0.1)' }}>
+            <IconButton
+              color="inherit"
+              onClick={handleOpenVideoModal}
+              sx={{
+                bgcolor: 'rgba(255,255,255,0.10)',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.20)' },
+              }}
+            >
               <PlayCircleOutlineIcon />
             </IconButton>
           </Tooltip>
 
-          <FormControl size="small" variant="standard" sx={{ m: 1, minWidth: 60 }}>
+          <FormControl size="small" variant="standard" sx={{ minWidth: 56 }}>
             <Select
               value={lang}
               onChange={(e) => setLang(e.target.value as 'ru' | 'kk')}
               disableUnderline
               sx={{
                 color: 'white',
-                fontWeight: '600',
-                '& .MuiSelect-icon': { color: 'white' }
+                fontWeight: 600,
+                '& .MuiSelect-icon': { color: 'white' },
+                '& .MuiSelect-select': { py: 0.5, px: 1 },
               }}
             >
               <MenuItem value="ru">RU</MenuItem>
@@ -106,7 +140,14 @@ export default function Header() {
           </FormControl>
 
           <Tooltip title={t('logout')}>
-            <IconButton color="inherit" onClick={handleLogout} sx={{ bgcolor: 'rgba(255,255,255,0.1)', ml: 1 }}>
+            <IconButton
+              color="inherit"
+              onClick={handleLogout}
+              sx={{
+                bgcolor: 'rgba(255,255,255,0.10)',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.20)' },
+              }}
+            >
               <LogoutIcon />
             </IconButton>
           </Tooltip>

@@ -5,11 +5,11 @@ from sqlalchemy.sql import func
 from ..database.base import Base
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"                       # Супер-администратор, может всё включая справочники
-    DIRECTOR_DRVC = "director_drvc"       # Директор ДРВЦ
-    ANALYST_DRVC = "analyst_drvc"         # Аналитик ДРВЦ
-    ANALYST_MANAGER = "analyst_manager"   # Менеджер аналитиков — утверждает сопоставления
-    USER = "user"                         # Обычный пользователь
+    ADMIN = "ADMIN"                           # Супер-администратор, может всё включая справочники
+    DIRECTOR_DRVC = "DIRECTOR_DRVC"           # Директор ДРВЦ
+    ANALYST_DRVC = "ANALYST_DRVC"             # Аналитик ДРВЦ
+    ANALYST_MANAGER = "ANALYST_MANAGER"       # Менеджер аналитиков — утверждает сопоставления
+    USER = "USER"                             # Обычный пользователь
 
 class User(Base):
     __tablename__ = "users"

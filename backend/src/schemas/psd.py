@@ -8,23 +8,23 @@ class ExternalDocumentSchema(BaseModel):
     id: int
     doc_type: str
     bank_name: str
-    
+
     # Данные отправителя
     sender_first_name: Optional[str] = None
     sender_last_name: Optional[str] = None
     sender_patronymic: Optional[str] = None
     sender_email: Optional[str] = None
     sender_phone: Optional[str] = None
-    
+
     # Интеграция
     external_id: Optional[str] = None
     callback_url: Optional[str] = None
-    
+
     received_at: datetime
     status: str
     file_path: str
     notes: Optional[str] = None
-    
+
     # Назначение (Аналитик)
     assigned_to: Optional[int] = None
     assigned_at: Optional[datetime] = None
@@ -39,21 +39,43 @@ class ExternalDocumentSchema(BaseModel):
     @field_validator("assigned_user_name", mode="before")
     @classmethod
     def get_assigned_user_name(cls, v, info):
-        # Если значение пришло напрямую (через query join), возвращаем его
         if v: return v
-        # Пытаемся достать из объекта модели через relationship
         obj = info.data.get("__pydantic_extra__", {}).get("assigned_user") if hasattr(info, "data") else None
-        # В SQLAlchemy объекте при from_attributes=True мы можем получить доступ к атрибутам
         return None
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class SupplierSelectionSchema(BaseModel):
+    """Выбор поставщика аналитиком для конкретной позиции ПСД."""
+    id: int
+    item_id: int
+    agsk_code: str
+    enstru_code: Optional[str] = None
+    ktp_id: Optional[int] = None
+    product_code: Optional[str] = None
+    supplier_bin: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_product: Optional[str] = None
+    dvc_percent: Optional[float] = None
+    selected_by: int
+    selected_at: Optional[datetime] = None
+    library_match_id: Optional[int] = None
+    # pending | active | rejected
+    status: str
+    is_active: bool
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ManualMatchStatusSchema(BaseModel):
     id: int
     enstru_code: str
-    status: str  # 'pending' | 'approved' | 'rejected'
+    status: str  # 'pending' | 'active' | 'rejected'
     matched_at: Optional[datetime] = None
     approved_at: Optional[datetime] = None
+
 
 class PsdDocumentItemSchema(BaseModel):
     id: int
@@ -77,6 +99,7 @@ class PsdDocumentItemSchema(BaseModel):
     current_manual_match: Optional[Any] = None
     model_config = ConfigDict(from_attributes=True)
 
+
 class PsdItemsResponse(BaseModel):
     items: List[PsdDocumentItemSchema]
     total: int
@@ -84,25 +107,36 @@ class PsdItemsResponse(BaseModel):
     limit: int
     pending_match_count: int = 0
 
+
 class SaveMatchRequest(BaseModel):
+    """Запрос аналитика на выбор поставщика из Реестра КТП для позиции ПСД."""
     enstru_code: str
+    ktp_id: Optional[int] = None
+    product_code: Optional[str] = None
+    supplier_bin: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_product: Optional[str] = None
+    dvc_percent: Optional[float] = None
+
 
 class AgskEnstruMatchSchema(BaseModel):
     id: int
     agsk_code: str
+    agsk_full_name: Optional[str] = None
     enstru_code: str
-    doc_id: Optional[int] = None
-    item_id: Optional[int] = None
-    item_name: Optional[str] = None
-    matched_by: int
+    enstru_name_rus: Optional[str] = None
+    enstru_detail_rus: Optional[str] = None
+    enstru_standard: Optional[str] = None
+    created_by: int
     analyst_name: Optional[str] = None
-    matched_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
     is_approved: bool
     is_active: bool
     approved_by: Optional[int] = None
     approved_by_name: Optional[str] = None
     approved_at: Optional[datetime] = None
     status: str  # 'pending' | 'approved' | 'rejected'
+
 
 class AgskEnstruMatchesResponse(BaseModel):
     items: List[AgskEnstruMatchSchema]

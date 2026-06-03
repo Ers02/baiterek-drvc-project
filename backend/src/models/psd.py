@@ -80,17 +80,15 @@ class PsdDocumentItem(Base):
 
 
 class AgskEnstruMatch(Base):
-    """Ручные сопоставления аналитиков АГСК → ЕНСТРУ, требующие утверждения менеджера"""
+    """Глобальная библиотека сопоставлений АГСК → ЕНСТРУ (требует утверждения менеджера).
+    Уникальна по паре (agsk_code, enstru_code)."""
     __tablename__ = "agsk_enstru_matches"
     id = Column(Integer, primary_key=True)
     agsk_code = Column(String(50), nullable=False)
     enstru_code = Column(String(35), nullable=False)
-    # Контекст: если doc_id/item_id заполнены — сопоставление в рамках документа ПСД
-    # Если null — общее глобальное сопоставление АГСК→ЕНСТРУ
-    doc_id = Column(Integer, ForeignKey("external_documents.id", ondelete="CASCADE"), nullable=True)
-    item_id = Column(Integer, ForeignKey("psd_document_items.id", ondelete="CASCADE"), nullable=True)
-    matched_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    matched_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Кто создал сопоставление
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_approved = Column(Boolean, default=False, nullable=False, server_default='false')
     approved_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
@@ -98,9 +96,39 @@ class AgskEnstruMatch(Base):
 
     __table_args__ = (
         Index('idx_aem_agsk_code', 'agsk_code'),
-        Index('idx_aem_item_id', 'item_id'),
-        Index('idx_aem_doc_id', 'doc_id'),
-        Index('idx_aem_matched_by', 'matched_by'),
+        Index('idx_aem_created_by', 'created_by'),
+    )
+
+
+class PsdItemSupplierSelection(Base):
+    """Выбор поставщика аналитиком для конкретной позиции ПСД.
+    Статус определяется статусом связанной записи в библиотеке (library_match_id)."""
+    __tablename__ = "psd_item_supplier_selections"
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("psd_document_items.id", ondelete="CASCADE"), nullable=False)
+    agsk_code = Column(String(50), nullable=False)
+    enstru_code = Column(String(35), nullable=True)
+    ktp_id = Column(Integer, ForeignKey("reestr_ktp.id", ondelete="SET NULL"), nullable=True)
+    product_code = Column(Text, nullable=True)       # product_code из Реестра КТП (для AI-обучения)
+    supplier_bin = Column(String(12), nullable=True)
+    supplier_name = Column(Text, nullable=True)
+    supplier_product = Column(Text, nullable=True)
+    dvc_percent = Column(Numeric(5, 2), nullable=True)
+    selected_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    selected_at = Column(DateTime(timezone=True), server_default=func.now())
+    library_match_id = Column(Integer, ForeignKey("agsk_enstru_matches.id", ondelete="SET NULL"), nullable=True)
+    # pending  — ждёт утверждения библиотечной записи менеджером
+    # active   — библиотечная запись утверждена; попадает в Excel
+    # rejected — менеджер отклонил библиотечную запись; не попадает в Excel
+    status = Column(String(20), nullable=False, default='active', server_default='active')
+    is_active = Column(Boolean, nullable=False, default=True, server_default='true')
+    notes = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index('idx_piss_item_id', 'item_id'),
+        Index('idx_piss_agsk_code', 'agsk_code'),
+        Index('idx_piss_library_match', 'library_match_id'),
+        Index('idx_piss_selected_by', 'selected_by'),
     )
 
 

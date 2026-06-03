@@ -7,7 +7,6 @@ import os
 import shutil
 import uuid
 import httpx
-
 from ..database.database import get_db
 from ..models import models
 from ..services.psd_analyst_service import PsdAnalystService
@@ -133,33 +132,65 @@ def submit_for_approval(
     current_user: models.User = Depends(get_current_user)
 ):
     """Аналитик отправляет на утверждение директору.
-    Проверяет что все позиции обработаны (есть enstru_code или not_in_ktp_registry)."""
+    Блокируется если есть GOODS-позиции:
+    - без выбора поставщика вообще (ни active, ни pending)
+    - с только pending-выборами (ожидают одобрения менеджером-аналитиком)
+    Позиции с active-выбором или отмеченные «нет в реестре» — считаются обработанными."""
 
-    # Проверяем что все позиции обработаны
+    from sqlalchemy import or_ as _or_
+
+    # Subquery: все item_id с хотя бы одним активным выбором поставщика
+    active_sel_item_ids_subq = db.query(models.PsdItemSupplierSelection.item_id).filter(
+        models.PsdItemSupplierSelection.status == 'active',
+        models.PsdItemSupplierSelection.is_active == True,
+    ).subquery()
+
+    # Позиции без активного выбора поставщика и без отметки «нет в реестре»
+    # (включает позиции с только pending-выборами — они ещё не обработаны)
     unprocessed_items = db.query(models.PsdDocumentItem).filter(
         models.PsdDocumentItem.document_id == doc_id,
-        models.PsdDocumentItem.item_type.in_(['GOODS', None]),  # только товары требуют сопоставления
-        models.PsdDocumentItem.enstru_code.is_(None),
-        models.PsdDocumentItem.not_in_ktp_registry.is_(False) | models.PsdDocumentItem.not_in_ktp_registry.is_(None)
+        models.PsdDocumentItem.item_type.in_(['GOODS', None]),
+        _or_(
+            models.PsdDocumentItem.not_in_ktp_registry == False,
+            models.PsdDocumentItem.not_in_ktp_registry == None,
+        ),
+        ~models.PsdDocumentItem.id.in_(active_sel_item_ids_subq),
     ).all()
 
     if unprocessed_items:
-        items_list = [f"{item.position_number or '—'}: {item.name[:50]}..." for item in unprocessed_items[:5]]
-        error_msg = f"Нельзя отправить на утверждение. Есть необработанные позиции ({len(unprocessed_items)} шт.):\n" + "\n".join(items_list)
-        if len(unprocessed_items) > 5:
-            error_msg += f"\n... и еще {len(unprocessed_items) - 5} позиций"
-        raise HTTPException(status_code=400, detail=error_msg)
+        # Разделяем: pending-ожидающие vs совсем не обработанные
+        pending_item_ids_subq = db.query(models.PsdItemSupplierSelection.item_id).filter(
+            models.PsdItemSupplierSelection.status == 'pending',
+            models.PsdItemSupplierSelection.is_active == True,
+        ).subquery()
+        unprocessed_ids = {it.id for it in unprocessed_items}
+        pending_ids = {
+            row.item_id
+            for row in db.query(models.PsdItemSupplierSelection.item_id).filter(
+                models.PsdItemSupplierSelection.item_id.in_(list(unprocessed_ids)),
+                models.PsdItemSupplierSelection.status == 'pending',
+                models.PsdItemSupplierSelection.is_active == True,
+            ).all()
+        }
+        truly_unprocessed = [it for it in unprocessed_items if it.id not in pending_ids]
+        pending_items = [it for it in unprocessed_items if it.id in pending_ids]
 
-    # Проверяем неутверждённые ручные сопоставления (ждут менеджера)
-    pending_matches = db.query(models.AgskEnstruMatch).filter(
-        models.AgskEnstruMatch.doc_id == doc_id,
-        models.AgskEnstruMatch.is_active == True,
-        models.AgskEnstruMatch.is_approved == False,
-    ).count()
-    if pending_matches > 0:
+        error_parts = []
+        if truly_unprocessed:
+            names = [f"{it.position_number or '—'}: {it.name[:45]}..." for it in truly_unprocessed[:5]]
+            error_parts.append(
+                f"Не обработано ({len(truly_unprocessed)} шт.):\n" + "\n".join(names) +
+                (f"\n... и ещё {len(truly_unprocessed) - 5}" if len(truly_unprocessed) > 5 else "")
+            )
+        if pending_items:
+            names = [f"{it.position_number or '—'}: {it.name[:45]}..." for it in pending_items[:5]]
+            error_parts.append(
+                f"Ожидают одобрения менеджером ({len(pending_items)} шт.):\n" + "\n".join(names) +
+                (f"\n... и ещё {len(pending_items) - 5}" if len(pending_items) > 5 else "")
+            )
         raise HTTPException(
             status_code=400,
-            detail=f"Нельзя отправить на утверждение. Есть {pending_matches} сопоставлений, ожидающих подтверждения менеджером аналитиков."
+            detail="Нельзя отправить на утверждение.\n" + "\n\n".join(error_parts)
         )
 
     try:
@@ -221,7 +252,12 @@ def get_document_items(doc_id: int, only_unmatched: bool = False, search: Option
 
 @router.get("/document-items/{doc_id}/item/{item_id}")
 def get_document_item(doc_id: int, item_id: int, db: Session = Depends(get_db)):
-    """Получить одну позицию документа с актуальными данными."""
+    """Получить одну позицию документа с актуальными данными.
+
+    Дополнительно возвращает previous_agsk_selections — ранее выбранные поставщики
+    для того же АГСК-кода в других документах. Если поставщик стал неактивным
+    в реестре КТП — помечается ktp_is_active=False.
+    """
     item = db.query(models.PsdDocumentItem).filter(
         models.PsdDocumentItem.id == item_id,
         models.PsdDocumentItem.document_id == doc_id
@@ -234,22 +270,87 @@ def get_document_item(doc_id: int, item_id: int, db: Session = Depends(get_db)):
     if item.code_sn:
         agsk_info = db.query(models.Agsk).filter(models.Agsk.code == item.code_sn).first()
 
-    # Загружаем ВСЕ активные ручные матчи для этой позиции
-    active_matches = db.query(models.AgskEnstruMatch).filter(
-        models.AgskEnstruMatch.item_id == item_id,
-        models.AgskEnstruMatch.is_active == True,
-    ).order_by(models.AgskEnstruMatch.id.desc()).all()
+    # Загружаем активные выборы поставщиков для этой позиции
+    active_selections = db.query(models.PsdItemSupplierSelection).filter(
+        models.PsdItemSupplierSelection.item_id == item_id,
+        models.PsdItemSupplierSelection.is_active == True,
+    ).order_by(models.PsdItemSupplierSelection.id.desc()).all()
 
     current_manual_matches = []
-    for lm in active_matches:
-        m_status = "approved" if lm.is_approved else "pending"
+    for sel in active_selections:
         current_manual_matches.append({
-            "id": lm.id,
-            "enstru_code": lm.enstru_code,
-            "status": m_status,
-            "matched_at": lm.matched_at.isoformat() if lm.matched_at else None,
-            "approved_at": lm.approved_at.isoformat() if lm.approved_at else None,
+            "id": sel.id,
+            "enstru_code": sel.enstru_code or "",
+            "status": sel.status,
+            "ktp_id": sel.ktp_id,
+            "supplier_name": sel.supplier_name,
+            "supplier_bin": sel.supplier_bin,
+            "supplier_product": sel.supplier_product,
+            "dvc_percent": float(sel.dvc_percent) if sel.dvc_percent else None,
+            "matched_at": sel.selected_at.isoformat() if sel.selected_at else None,
+            "approved_at": None,
         })
+
+    # ── Ранее выбирались для того же АГСК-кода (из других документов) ──────────
+    previous_agsk_selections = []
+    if item.code_sn:
+        # Берём уникальные активные выборы поставщиков по тому же АГСК
+        # из ДРУГИХ позиций (не текущей), группируем по ktp_id+enstru_code
+        from sqlalchemy import func as _func
+        prev_rows = (
+            db.query(
+                models.PsdItemSupplierSelection.ktp_id,
+                models.PsdItemSupplierSelection.enstru_code,
+                models.PsdItemSupplierSelection.supplier_bin,
+                models.PsdItemSupplierSelection.supplier_name,
+                models.PsdItemSupplierSelection.supplier_product,
+                models.PsdItemSupplierSelection.dvc_percent,
+                _func.count(models.PsdItemSupplierSelection.id).label("times_selected"),
+                _func.max(models.PsdItemSupplierSelection.selected_at).label("last_selected_at"),
+            )
+            .filter(
+                models.PsdItemSupplierSelection.agsk_code == item.code_sn,
+                models.PsdItemSupplierSelection.item_id != item_id,
+                models.PsdItemSupplierSelection.status == "active",
+                models.PsdItemSupplierSelection.is_active == True,
+            )
+            .group_by(
+                models.PsdItemSupplierSelection.ktp_id,
+                models.PsdItemSupplierSelection.enstru_code,
+                models.PsdItemSupplierSelection.supplier_bin,
+                models.PsdItemSupplierSelection.supplier_name,
+                models.PsdItemSupplierSelection.supplier_product,
+                models.PsdItemSupplierSelection.dvc_percent,
+            )
+            .order_by(_func.count(models.PsdItemSupplierSelection.id).desc())
+            .limit(10)
+            .all()
+        )
+
+        # Для каждого уникального ktp_id проверяем is_active в реестре КТП
+        ktp_ids_prev = list({r.ktp_id for r in prev_rows if r.ktp_id})
+        ktp_active_map: dict = {}
+        if ktp_ids_prev:
+            ktp_recs = db.query(models.Reestr_KTP).filter(
+                models.Reestr_KTP.id.in_(ktp_ids_prev)
+            ).all()
+            ktp_active_map = {r.id: r.is_active for r in ktp_recs}
+
+        for r in prev_rows:
+            ktp_is_active = ktp_active_map.get(r.ktp_id)  # True / False / None
+            # None = поле не заполнено → считаем активным
+            is_inactive = (ktp_is_active is False)
+            previous_agsk_selections.append({
+                "ktp_id": r.ktp_id,
+                "enstru_code": r.enstru_code or "",
+                "supplier_bin": r.supplier_bin or "",
+                "supplier_name": r.supplier_name or "",
+                "supplier_product": r.supplier_product or "",
+                "dvc_percent": float(r.dvc_percent) if r.dvc_percent else None,
+                "times_selected": r.times_selected,
+                "last_selected_at": r.last_selected_at.isoformat() if r.last_selected_at else None,
+                "ktp_is_active": not is_inactive,   # False = поставщик стал неактивным
+            })
 
     return {
         "id": item.id,
@@ -273,6 +374,7 @@ def get_document_item(doc_id: int, item_id: int, db: Session = Depends(get_db)):
         "agsk_full_name": agsk_info.full_name if agsk_info else None,
         "item_type": item.item_type or "GOODS",
         "current_manual_matches": current_manual_matches,
+        "previous_agsk_selections": previous_agsk_selections,
     }
 
 @router.get("/documents/{doc_id}/download-result")
@@ -389,27 +491,40 @@ def save_analyst_match(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Аналитик сохраняет ручное сопоставление для позиции. Требует утверждения менеджером."""
+    """Аналитик выбирает поставщика из Реестра КТП для позиции ПСД.
+    Создаёт запись в psd_item_supplier_selections + при необходимости в библиотеке."""
     try:
-        match = psd_service.save_analyst_match(db, item_id, body.enstru_code, current_user.id)
+        selection = psd_service.add_supplier_selection(
+            db,
+            item_id=item_id,
+            enstru_code=body.enstru_code,
+            analyst_id=current_user.id,
+            ktp_id=body.ktp_id,
+            product_code=body.product_code,
+            supplier_bin=body.supplier_bin,
+            supplier_name=body.supplier_name,
+            supplier_product=body.supplier_product,
+            dvc_percent=body.dvc_percent,
+        )
         return {
-            "id": match.id,
-            "agsk_code": match.agsk_code,
-            "enstru_code": match.enstru_code,
-            "item_id": match.item_id,
-            "doc_id": match.doc_id,
-            "status": "pending",
-            "matched_at": match.matched_at.isoformat() if match.matched_at else None,
+            "id": selection.id,
+            "item_id": selection.item_id,
+            "enstru_code": selection.enstru_code,
+            "status": selection.status,
+            "ktp_id": selection.ktp_id,
+            "supplier_name": selection.supplier_name,
+            "supplier_bin": selection.supplier_bin,
+            "dvc_percent": float(selection.dvc_percent) if selection.dvc_percent else None,
+            "selected_at": selection.selected_at.isoformat() if selection.selected_at else None,
         }
     except ValueError as e:
         msg = str(e)
-        status_code = 409 if "уже сопоставлен" in msg else 404
+        status_code = 409 if "уже выбран" in msg else 404
         raise HTTPException(status_code=status_code, detail=msg)
 
 
 @router.get("/matches", response_model=AgskEnstruMatchesResponse)
 def get_matches_library(
-    doc_id: Optional[int] = Query(None),
     analyst_id: Optional[int] = Query(None),
     date_filter: str = Query("all", description="'today' или 'all'"),
     skip: int = Query(0),
@@ -417,11 +532,11 @@ def get_matches_library(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Список ручных сопоставлений (все типы). Для аналитика — только свои."""
+    """Глобальная библиотека АГСК→ЕНСТРУ сопоставлений. Аналитик видит только свои."""
     # Аналитик видит только свои сопоставления
     if current_user.role == models.UserRole.ANALYST_DRVC:
         analyst_id = current_user.id
-    return psd_service.get_matches_library(db, doc_id, analyst_id, date_filter, skip, limit)
+    return psd_service.get_matches_library(db, analyst_id, date_filter, skip, limit)
 
 
 @router.post("/matches/{match_id}/approve")
@@ -458,15 +573,33 @@ def delete_match(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Аналитик удаляет своё сопоставление (пока не утверждено)."""
-    match = db.query(models.AgskEnstruMatch).filter(models.AgskEnstruMatch.id == match_id).first()
-    if not match:
-        raise HTTPException(status_code=404, detail="Сопоставление не найдено")
-    if match.matched_by != current_user.id and current_user.role not in [models.UserRole.ADMIN, models.UserRole.ANALYST_MANAGER]:
-        raise HTTPException(status_code=403, detail="Нет прав для удаления этого сопоставления")
-    if match.is_approved:
-        raise HTTPException(status_code=400, detail="Нельзя удалить уже утверждённое сопоставление")
-    match.is_active = False
+    """Удаляет выбор поставщика (по ID из psd_item_supplier_selections).
+    Аналитик может удалить только свой выбор."""
+    sel = db.query(models.PsdItemSupplierSelection).filter(
+        models.PsdItemSupplierSelection.id == match_id
+    ).first()
+    if not sel:
+        raise HTTPException(status_code=404, detail="Выбор поставщика не найден")
+    if sel.selected_by != current_user.id and current_user.role not in [
+        models.UserRole.ADMIN, models.UserRole.ANALYST_MANAGER
+    ]:
+        raise HTTPException(status_code=403, detail="Нет прав для удаления этого выбора")
+
+    item_id = sel.item_id
+    sel.is_active = False
+    db.flush()
+
+    # Если активных выборов не осталось — откатываем match_type позиции
+    remaining = db.query(models.PsdItemSupplierSelection).filter(
+        models.PsdItemSupplierSelection.item_id == item_id,
+        models.PsdItemSupplierSelection.is_active == True,
+    ).count()
+    if remaining == 0:
+        item = db.query(models.PsdDocumentItem).filter(models.PsdDocumentItem.id == item_id).first()
+        if item:
+            item.match_type = 'suggested' if item.enstru_code else 'none'
+            item.match_reason = 'Подсказка из библиотеки — поставщик удалён, выберите нового из реестра КТП'
+
     db.commit()
     return {"status": "deleted", "match_id": match_id}
 
@@ -496,12 +629,11 @@ def save_not_in_ktp_registry(
         item.match_score = None
         item.match_reason = None
 
-        # Деактивируем активные сопоставления для этой позиции в новой библиотеке
-        if item.code_sn:
-            db.query(models.AgskEnstruMatch).filter(
-                models.AgskEnstruMatch.item_id == item_id,
-                models.AgskEnstruMatch.is_active == True,
-            ).update({"is_active": False}, synchronize_session=False)
+        # Деактивируем выборы поставщиков для этой позиции
+        db.query(models.PsdItemSupplierSelection).filter(
+            models.PsdItemSupplierSelection.item_id == item_id,
+            models.PsdItemSupplierSelection.is_active == True,
+        ).update({"is_active": False, "status": "rejected"}, synchronize_session=False)
 
     db.commit()
     return {"status": "success", "item_id": item_id, "not_in_ktp_registry": value}
