@@ -13,7 +13,7 @@ import {
     DialogTitle, DialogContent, TextField, DialogActions, Tooltip,
     Pagination, Divider, Card, CardContent, InputAdornment,
     LinearProgress, CircularProgress, Stack, FormControlLabel, Switch,
-    ToggleButtonGroup, ToggleButton
+    ToggleButtonGroup, ToggleButton, Select, MenuItem, FormControl
 } from '@mui/material';
 import {
     Delete as DeleteIcon, Download as DownloadIcon,
@@ -121,6 +121,7 @@ const PsdAnalystPage: React.FC = () => {
     const [approvingId, setApprovingId] = useState<number | null>(null);
     const [librarySearch, setLibrarySearch] = useState('');
     const [libraryStatusFilter, setLibraryStatusFilter] = useState<string>('all');
+    const [libraryAnalystFilter, setLibraryAnalystFilter] = useState<number | null>(null);
     const debouncedLibrarySearch = useDebounce(librarySearch, 400);
 
     // Диалог создания связки АГСК→ЕНСТРУ
@@ -163,7 +164,7 @@ const PsdAnalystPage: React.FC = () => {
         if (activeTab === archiveTabIndex) {
             loadMatchesLibrary();
         }
-    }, [activeTab, matchDateFilter, selectedDoc, matchesLibraryPage, debouncedLibrarySearch, libraryStatusFilter]);
+    }, [activeTab, matchDateFilter, selectedDoc, matchesLibraryPage, debouncedLibrarySearch, libraryStatusFilter, libraryAnalystFilter]);
 
     useEffect(() => {
         if (!debouncedAgskInput || debouncedAgskInput.length < 2) { setAgskOptions([]); return; }
@@ -488,6 +489,7 @@ const PsdAnalystPage: React.FC = () => {
                 limit: LIBRARY_PAGE_SIZE,
                 search: debouncedLibrarySearch || undefined,
                 status_filter: libraryStatusFilter !== 'all' ? libraryStatusFilter : undefined,
+                analyst_id: libraryAnalystFilter ?? undefined,
             });
             setMatchesLibrary(data.items);
             setMatchesLibraryTotal(data.total);
@@ -1694,6 +1696,25 @@ const PsdAnalystPage: React.FC = () => {
                                 <ToggleButton value="all" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Все</ToggleButton>
                                 <ToggleButton value="today" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Сегодня</ToggleButton>
                             </ToggleButtonGroup>
+                            {(isAnalystManager || isDirector) && (<>
+                                <Divider orientation="vertical" flexItem/>
+                                <Typography variant="caption" color="text.secondary" sx={{whiteSpace: 'nowrap'}}>Аналитик:</Typography>
+                                <FormControl size="small" sx={{minWidth: 180}}>
+                                    <Select
+                                        value={libraryAnalystFilter ?? ''}
+                                        onChange={e => { const v = e.target.value; setLibraryAnalystFilter(v === '' || v === 0 ? null : Number(v)); setMatchesLibraryPage(1); }}
+                                        displayEmpty
+                                        sx={{fontSize: '0.82rem', bgcolor: 'white'}}
+                                    >
+                                        <MenuItem value=""><em style={{fontStyle: 'normal', color: '#999'}}>Все аналитики</em></MenuItem>
+                                        {analysts.map(a => (
+                                            <MenuItem key={a.id} value={a.id} sx={{fontSize: '0.82rem'}}>
+                                                {a.full_name}
+                                            </MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
+                            </>)}
                         </Paper>
 
                         {/* Группированный вид: один блок = один АГСК со всеми ЕНСТРУ */}

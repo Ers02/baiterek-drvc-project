@@ -91,6 +91,7 @@ export const fetchMatchesLibrary = (params: {
     limit: number;
     search?: string;
     status_filter?: string;
+    analyst_id?: number;
 }): Promise<{ items: AgskEnstruMatchItem[]; total: number }> =>
     api.get('/psd-analyst/matches', {params}).then(r => r.data);
 
