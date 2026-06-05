@@ -14,6 +14,9 @@ export const fetchCurrentUser = (): Promise<User> =>
 export const fetchAnalysts = (): Promise<{ id: number; full_name: string }[]> =>
     api.get('/psd-analyst/analysts').then(r => r.data);
 
+export const fetchLibraryUsers = (): Promise<{ id: number; full_name: string; role_label: string }[]> =>
+    api.get('/psd-analyst/library-users').then(r => r.data);
+
 export const fetchDocuments = (assignedToMe: boolean, isTest: boolean): Promise<ExternalDocument[]> =>
     api.get('/psd-analyst/documents', {
         params: {assigned_to_me: assignedToMe, is_test: isTest},

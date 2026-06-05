@@ -122,6 +122,7 @@ const PsdAnalystPage: React.FC = () => {
     const [librarySearch, setLibrarySearch] = useState('');
     const [libraryStatusFilter, setLibraryStatusFilter] = useState<string>('all');
     const [libraryAnalystFilter, setLibraryAnalystFilter] = useState<number | null>(null);
+    const [libraryUsers, setLibraryUsers] = useState<{id: number; full_name: string; role_label: string}[]>([]);
     const debouncedLibrarySearch = useDebounce(librarySearch, 400);
 
     // Диалог создания связки АГСК→ЕНСТРУ
@@ -146,6 +147,7 @@ const PsdAnalystPage: React.FC = () => {
         loadCurrentUser();
         loadDocuments();
         loadAnalysts();
+        psdApi.fetchLibraryUsers().then(setLibraryUsers);
     }, [showTests, assignedToMe]);
 
     useEffect(() => {
@@ -1698,20 +1700,32 @@ const PsdAnalystPage: React.FC = () => {
                             </ToggleButtonGroup>
                             {(isAnalystManager || isDirector) && (<>
                                 <Divider orientation="vertical" flexItem/>
-                                <Typography variant="caption" color="text.secondary" sx={{whiteSpace: 'nowrap'}}>Аналитик:</Typography>
-                                <FormControl size="small" sx={{minWidth: 180}}>
+                                <Typography variant="caption" color="text.secondary" sx={{whiteSpace: 'nowrap'}}>Пользователь:</Typography>
+                                <FormControl size="small" sx={{minWidth: 200}}>
                                     <Select
                                         value={libraryAnalystFilter ?? ''}
-                                        onChange={e => { const v = e.target.value; setLibraryAnalystFilter(v === '' || v === 0 ? null : Number(v)); setMatchesLibraryPage(1); }}
+                                        onChange={e => { const v = e.target.value; setLibraryAnalystFilter(!v ? null : Number(v)); setMatchesLibraryPage(1); }}
                                         displayEmpty
                                         sx={{fontSize: '0.82rem', bgcolor: 'white'}}
                                     >
-                                        <MenuItem value=""><em style={{fontStyle: 'normal', color: '#999'}}>Все аналитики</em></MenuItem>
-                                        {analysts.map(a => (
-                                            <MenuItem key={a.id} value={a.id} sx={{fontSize: '0.82rem'}}>
-                                                {a.full_name}
-                                            </MenuItem>
-                                        ))}
+                                        <MenuItem value=""><em style={{fontStyle: 'normal', color: '#999'}}>Все</em></MenuItem>
+                                        {(() => {
+                                            const grouped: Record<string, typeof libraryUsers> = {};
+                                            for (const u of libraryUsers) {
+                                                if (!grouped[u.role_label]) grouped[u.role_label] = [];
+                                                grouped[u.role_label].push(u);
+                                            }
+                                            return Object.entries(grouped).flatMap(([label, users]) => [
+                                                <MenuItem key={`group-${label}`} disabled sx={{fontSize: '0.7rem', color: 'text.disabled', py: 0.25, fontWeight: 'bold', opacity: '1 !important'}}>
+                                                    — {label} —
+                                                </MenuItem>,
+                                                ...users.map(u => (
+                                                    <MenuItem key={u.id} value={u.id} sx={{fontSize: '0.82rem', pl: 2}}>
+                                                        {u.full_name}
+                                                    </MenuItem>
+                                                ))
+                                            ]);
+                                        })()}
                                     </Select>
                                 </FormControl>
                             </>)}

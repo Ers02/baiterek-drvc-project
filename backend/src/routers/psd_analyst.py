@@ -247,6 +247,23 @@ def get_analysts_list(db: Session = Depends(get_db)):
     users = db.query(models.User).filter(models.User.role == models.UserRole.ANALYST_DRVC).all()
     return [{"id": u.id, "full_name": u.full_name} for u in users]
 
+
+@router.get("/library-users", response_model=List[dict])
+def get_library_users(db: Session = Depends(get_db)):
+    """Все пользователи которые могут создавать сопоставления — для фильтра библиотеки."""
+    roles = [
+        models.UserRole.ANALYST_DRVC,
+        models.UserRole.ANALYST_MANAGER,
+        models.UserRole.DIRECTOR_DRVC,
+    ]
+    users = db.query(models.User).filter(models.User.role.in_(roles)).order_by(models.User.full_name).all()
+    role_labels = {
+        models.UserRole.ANALYST_DRVC: "Аналитик",
+        models.UserRole.ANALYST_MANAGER: "Менеджер аналитиков",
+        models.UserRole.DIRECTOR_DRVC: "Директор ДРВЦ",
+    }
+    return [{"id": u.id, "full_name": u.full_name, "role_label": role_labels.get(u.role, u.role)} for u in users]
+
 @router.get("/document-items/{doc_id}", response_model=PsdItemsResponse)
 def get_document_items(doc_id: int, only_unmatched: bool = False, search: Optional[str] = None, skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
     return psd_service.get_document_items_with_matches(db, doc_id, only_unmatched, search, skip, limit)
