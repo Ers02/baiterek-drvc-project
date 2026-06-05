@@ -89,8 +89,33 @@ export const fetchMatchesLibrary = (params: {
     date_filter: 'all' | 'today';
     skip: number;
     limit: number;
+    search?: string;
+    status_filter?: string;
 }): Promise<{ items: AgskEnstruMatchItem[]; total: number }> =>
     api.get('/psd-analyst/matches', {params}).then(r => r.data);
+
+export const createAgskEnstruMatch = (agsk_code: string, enstru_code: string) =>
+    api.post('/psd-analyst/matches', {agsk_code, enstru_code}).then(r => r.data);
+
+export const createAgskEnstruMatchBatch = (agsk_code: string, enstru_codes: string[]) =>
+    api.post('/psd-analyst/matches/batch', {agsk_code, enstru_codes}).then(r => r.data);
+
+export interface ExistingAgskMatch {
+    id: number;
+    enstru_code: string;
+    enstru_name_rus: string | null;
+    enstru_detail_rus: string | null;
+    status: 'pending' | 'approved' | 'rejected';
+}
+
+export const fetchMatchesByAgsk = (agsk_code: string): Promise<ExistingAgskMatch[]> =>
+    api.get(`/psd-analyst/matches/by-agsk/${encodeURIComponent(agsk_code)}`).then(r => r.data);
+
+export const searchAgsk = (q: string): Promise<{id: number; code: string; name_ru: string; full_name: string}[]> =>
+    api.get('/lookups/agsk', {params: {q}}).then(r => r.data);
+
+export const searchEnstru = (q: string): Promise<{id: number; code: string; name_rus: string; detail_rus?: string}[]> =>
+    api.get('/lookups/enstru', {params: {q}}).then(r => r.data);
 
 // ── Экспорт ────────────────────────────────────────────────────────────────
 

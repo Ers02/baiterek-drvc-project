@@ -13,7 +13,8 @@ from ..services.psd_analyst_service import PsdAnalystService
 from ..utils.auth import get_current_admin, get_current_user, get_current_director_or_admin, get_current_analyst_manager
 from ..schemas.psd import (
     ExternalDocumentSchema, PsdItemsResponse,
-    SaveMatchRequest, AgskEnstruMatchesResponse,
+    SaveMatchRequest, AgskEnstruMatchesResponse, CreateAgskEnstruMatchRequest,
+    CreateAgskEnstruMatchBatchRequest,
 )
 from ..core.config import settings
 from ..core.logger import logger
@@ -527,16 +528,60 @@ def save_analyst_match(
 def get_matches_library(
     analyst_id: Optional[int] = Query(None),
     date_filter: str = Query("all", description="'today' или 'all'"),
+    search: Optional[str] = Query(None, description="Поиск по коду АГСК или ЕНСТРУ"),
+    status_filter: Optional[str] = Query(None, description="pending | approved | rejected"),
     skip: int = Query(0),
     limit: int = Query(100, le=500),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     """Глобальная библиотека АГСК→ЕНСТРУ сопоставлений. Аналитик видит только свои."""
-    # Аналитик видит только свои сопоставления
     if current_user.role == models.UserRole.ANALYST_DRVC:
         analyst_id = current_user.id
-    return psd_service.get_matches_library(db, analyst_id, date_filter, skip, limit)
+    return psd_service.get_matches_library(db, analyst_id, date_filter, search, status_filter, skip, limit)
+
+
+@router.post("/matches", response_model=AgskEnstruMatchesResponse.__annotations__['items'].__args__[0] if False else dict)
+def create_match(
+    payload: CreateAgskEnstruMatchRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Создать новую связку АГСК→ЕНСТРУ вручную. Отправляется на утверждение менеджеру."""
+    try:
+        match = psd_service.create_match(db, payload.agsk_code, payload.enstru_code, current_user.id)
+        return {"id": match.id, "agsk_code": match.agsk_code, "enstru_code": match.enstru_code, "status": "pending"}
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/matches/by-agsk/{agsk_code}")
+def get_matches_by_agsk(
+    agsk_code: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Все связки для данного АГСК-кода (для диалога создания)."""
+    return psd_service.get_matches_by_agsk(db, agsk_code)
+
+
+@router.post("/matches/batch")
+def create_matches_batch(
+    payload: CreateAgskEnstruMatchBatchRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Создать несколько связок АГСК→ЕНСТРУ за раз. Каждая отправляется на утверждение."""
+    if not payload.enstru_codes:
+        raise HTTPException(status_code=400, detail="Список ЕНСТРУ не может быть пустым")
+    created, skipped = [], []
+    for enstru_code in payload.enstru_codes:
+        try:
+            match = psd_service.create_match(db, payload.agsk_code, enstru_code, current_user.id)
+            created.append({"id": match.id, "enstru_code": match.enstru_code})
+        except ValueError:
+            skipped.append(enstru_code)
+    return {"created": created, "skipped": skipped, "agsk_code": payload.agsk_code}
 
 
 @router.post("/matches/{match_id}/approve")

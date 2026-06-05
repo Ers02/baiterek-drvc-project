@@ -141,3 +141,13 @@ class AgskEnstruMatchSchema(BaseModel):
 class AgskEnstruMatchesResponse(BaseModel):
     items: List[AgskEnstruMatchSchema]
     total: int
+
+
+class CreateAgskEnstruMatchRequest(BaseModel):
+    agsk_code: str
+    enstru_code: str
+
+
+class CreateAgskEnstruMatchBatchRequest(BaseModel):
+    agsk_code: str
+    enstru_codes: List[str]

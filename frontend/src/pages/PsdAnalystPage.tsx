@@ -119,6 +119,25 @@ const PsdAnalystPage: React.FC = () => {
     const [matchDateFilter, setMatchDateFilter] = useState<'all' | 'today'>('all');
     const LIBRARY_PAGE_SIZE = 25;
     const [approvingId, setApprovingId] = useState<number | null>(null);
+    const [librarySearch, setLibrarySearch] = useState('');
+    const [libraryStatusFilter, setLibraryStatusFilter] = useState<string>('all');
+    const debouncedLibrarySearch = useDebounce(librarySearch, 400);
+
+    // Диалог создания связки АГСК→ЕНСТРУ
+    const [createMatchOpen, setCreateMatchOpen] = useState(false);
+    const [newMatchAgsk, setNewMatchAgsk] = useState<{code: string; full_name: string} | null>(null);
+    const [newMatchEnstruList, setNewMatchEnstruList] = useState<{code: string; name_rus: string}[]>([]);
+    const [agskOptions, setAgskOptions] = useState<{id: number; code: string; name_ru: string; full_name: string}[]>([]);
+    const [enstrupOptions, setEnstruOptions] = useState<{id: number; code: string; name_rus: string; detail_rus?: string}[]>([]);
+    const [agskInputVal, setAgskInputVal] = useState('');
+    const [enstrupInputVal, setEnstruInputVal] = useState('');
+    const [agskSearchLoading, setAgskSearchLoading] = useState(false);
+    const [enstrupSearchLoading, setEnstruSearchLoading] = useState(false);
+    const [creatingMatch, setCreatingMatch] = useState(false);
+    const [existingAgskMatches, setExistingAgskMatches] = useState<psdApi.ExistingAgskMatch[]>([]);
+    const [existingAgskLoading, setExistingAgskLoading] = useState(false);
+    const debouncedAgskInput = useDebounce(agskInputVal, 350);
+    const debouncedEnstruInput = useDebounce(enstrupInputVal, 350);
 
     const requestCounter = useRef(0);
 
@@ -144,7 +163,30 @@ const PsdAnalystPage: React.FC = () => {
         if (activeTab === archiveTabIndex) {
             loadMatchesLibrary();
         }
-    }, [activeTab, matchDateFilter, selectedDoc, matchesLibraryPage]);
+    }, [activeTab, matchDateFilter, selectedDoc, matchesLibraryPage, debouncedLibrarySearch, libraryStatusFilter]);
+
+    useEffect(() => {
+        if (!debouncedAgskInput || debouncedAgskInput.length < 2) { setAgskOptions([]); return; }
+        setAgskSearchLoading(true);
+        psdApi.searchAgsk(debouncedAgskInput).then(setAgskOptions).finally(() => setAgskSearchLoading(false));
+    }, [debouncedAgskInput]);
+
+    useEffect(() => {
+        if (!newMatchAgsk) { setExistingAgskMatches([]); return; }
+        setExistingAgskLoading(true);
+        psdApi.fetchMatchesByAgsk(newMatchAgsk.code)
+            .then(data => {
+                setExistingAgskMatches(data);
+                // Авто-добавляем отклонённые в список выбранных? Нет — пусть пользователь сам решит.
+            })
+            .finally(() => setExistingAgskLoading(false));
+    }, [newMatchAgsk]);
+
+    useEffect(() => {
+        if (!debouncedEnstruInput || debouncedEnstruInput.length < 2) { setEnstruOptions([]); return; }
+        setEnstruSearchLoading(true);
+        psdApi.searchEnstru(debouncedEnstruInput).then(setEnstruOptions).finally(() => setEnstruSearchLoading(false));
+    }, [debouncedEnstruInput]);
 
     useEffect(() => {
         const minLen = searchMode === 'agsk' ? 3 : 2;
@@ -444,11 +486,42 @@ const PsdAnalystPage: React.FC = () => {
                 date_filter: matchDateFilter,
                 skip: (matchesLibraryPage - 1) * LIBRARY_PAGE_SIZE,
                 limit: LIBRARY_PAGE_SIZE,
+                search: debouncedLibrarySearch || undefined,
+                status_filter: libraryStatusFilter !== 'all' ? libraryStatusFilter : undefined,
             });
             setMatchesLibrary(data.items);
             setMatchesLibraryTotal(data.total);
+            // Авто-раскрыть все группы если их немного
+            const uniqueAgsk = [...new Set(data.items.map((i: AgskEnstruMatchItem) => i.agsk_code))];
+            if (uniqueAgsk.length <= 15) setExpandedGroups(new Set(uniqueAgsk));
         } finally {
             setMatchesLoading(false);
+        }
+    };
+
+    const handleCreateMatch = async () => {
+        if (!newMatchAgsk || newMatchEnstruList.length === 0) return;
+        setCreatingMatch(true);
+        try {
+            const result = await psdApi.createAgskEnstruMatchBatch(
+                newMatchAgsk.code,
+                newMatchEnstruList.map(e => e.code),
+            );
+            setCreateMatchOpen(false);
+            setNewMatchAgsk(null);
+            setNewMatchEnstruList([]);
+            setAgskInputVal('');
+            setEnstruInputVal('');
+            setExistingAgskMatches([]);
+            loadMatchesLibrary();
+            if (result.skipped?.length > 0) {
+                alert(`Создано: ${result.created.length}. Уже существовали: ${result.skipped.join(', ')}`);
+            }
+        } catch (err: unknown) {
+            const msg = (err as {response?: {data?: {detail?: string}}})?.response?.data?.detail || 'Ошибка создания';
+            alert(msg);
+        } finally {
+            setCreatingMatch(false);
         }
     };
 
@@ -1572,18 +1645,11 @@ const PsdAnalystPage: React.FC = () => {
 
                 {activeTab === (selectedDoc ? 2 : 1) && (
                     <Box>
-                        {/* Заголовок и фильтры */}
-                        <Paper sx={{p: 1.5, mb: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', borderRadius: 2}}>
-                            <Typography variant="subtitle2" fontWeight="bold" color="primary">
+                        {/* Заголовок */}
+                        <Box sx={{display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5, flexWrap: 'wrap'}}>
+                            <Typography variant="subtitle1" fontWeight="bold" color="primary" sx={{flex: 1}}>
                                 Библиотека сопоставлений АГСК → ЕНСТРУ
                             </Typography>
-                            <Divider orientation="vertical" flexItem/>
-                            <ToggleButtonGroup size="small" value={matchDateFilter} exclusive
-                                onChange={(_, v) => { if (v) { setMatchDateFilter(v); setMatchesLibraryPage(1); } }} sx={{bgcolor: 'white'}}>
-                                <ToggleButton value="all" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Все</ToggleButton>
-                                <ToggleButton value="today" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Сегодня</ToggleButton>
-                            </ToggleButtonGroup>
-                            <Box sx={{flexGrow: 1}}/>
                             <Typography variant="caption" color="text.secondary">
                                 Всего: <b>{matchesLibraryTotal}</b>
                                 {matchesLibraryTotal > LIBRARY_PAGE_SIZE && (
@@ -1594,123 +1660,202 @@ const PsdAnalystPage: React.FC = () => {
                                     onClick={loadMatchesLibrary} disabled={matchesLoading} sx={{textTransform: 'none'}}>
                                 Обновить
                             </Button>
+                            <Button size="small" variant="contained" color="primary"
+                                    onClick={() => setCreateMatchOpen(true)}
+                                    sx={{textTransform: 'none', fontWeight: 'bold'}}>
+                                + Создать связку
+                            </Button>
+                        </Box>
+
+                        {/* Панель фильтров */}
+                        <Paper sx={{p: 1.5, mb: 2, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', borderRadius: 2, border: '1px solid #e0e0e0'}} elevation={0}>
+                            <TextField
+                                size="small"
+                                placeholder="Поиск по коду АГСК или ЕНСТРУ…"
+                                value={librarySearch}
+                                onChange={e => { setLibrarySearch(e.target.value); setMatchesLibraryPage(1); }}
+                                InputProps={{startAdornment: <InputAdornment position="start"><SearchIcon sx={{fontSize: 16}}/></InputAdornment>}}
+                                sx={{width: 260, '& .MuiInputBase-root': {fontSize: '0.82rem'}}}
+                            />
+                            <Divider orientation="vertical" flexItem/>
+                            <Typography variant="caption" color="text.secondary" sx={{whiteSpace: 'nowrap'}}>Статус:</Typography>
+                            <ToggleButtonGroup size="small" value={libraryStatusFilter} exclusive
+                                onChange={(_, v) => { if (v) { setLibraryStatusFilter(v); setMatchesLibraryPage(1); } }}
+                                sx={{bgcolor: 'white'}}>
+                                <ToggleButton value="all" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Все</ToggleButton>
+                                <ToggleButton value="pending" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem', color: 'warning.main'}}>Ожидает</ToggleButton>
+                                <ToggleButton value="approved" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem', color: 'success.main'}}>Утверждено</ToggleButton>
+                                <ToggleButton value="rejected" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem', color: 'error.main'}}>Отклонено</ToggleButton>
+                            </ToggleButtonGroup>
+                            <Divider orientation="vertical" flexItem/>
+                            <Typography variant="caption" color="text.secondary" sx={{whiteSpace: 'nowrap'}}>Дата:</Typography>
+                            <ToggleButtonGroup size="small" value={matchDateFilter} exclusive
+                                onChange={(_, v) => { if (v) { setMatchDateFilter(v); setMatchesLibraryPage(1); } }} sx={{bgcolor: 'white'}}>
+                                <ToggleButton value="all" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Все</ToggleButton>
+                                <ToggleButton value="today" sx={{px: 1.5, textTransform: 'none', fontSize: '0.75rem'}}>Сегодня</ToggleButton>
+                            </ToggleButtonGroup>
                         </Paper>
 
-                        <TableContainer component={Paper} sx={{borderRadius: 2, border: '1px solid #e0e0e0', position: 'relative'}}>
-                            {matchesLoading && <LinearProgress sx={{position: 'absolute', top: 0, left: 0, right: 0}}/>}
-                            <Table size="small">
-                                <TableHead sx={{bgcolor: '#fafafa'}}>
-                                    <TableRow>
-                                        <TableCell sx={{fontWeight: 'bold'}}>Статус</TableCell>
-                                        <TableCell sx={{fontWeight: 'bold'}}>АГСК</TableCell>
-                                        <TableCell sx={{fontWeight: 'bold'}}>ЕНСТРУ</TableCell>
-                                        <TableCell sx={{fontWeight: 'bold'}}>Аналитик</TableCell>
-                                        <TableCell sx={{fontWeight: 'bold'}}>Дата</TableCell>
-                                        {isAnalystManager && (
-                                            <TableCell align="right" sx={{fontWeight: 'bold'}}>Действие</TableCell>
-                                        )}
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {matchesLibrary.length === 0 && !matchesLoading && (
-                                        <TableRow>
-                                            <TableCell colSpan={isAnalystManager ? 6 : 5} align="center">
-                                                <Typography variant="caption" color="text.secondary" sx={{py: 3, display: 'block'}}>
-                                                    Нет сопоставлений
-                                                </Typography>
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                    {matchesLibrary.map(m => (
-                                        <TableRow key={m.id} hover sx={{
-                                            bgcolor: m.status === 'approved' ? '#f1f8e9' :
-                                                     m.status === 'rejected' ? '#fff8f8' : 'inherit'
-                                        }}>
-                                            <TableCell>
-                                                <Chip
-                                                    size="small"
-                                                    label={m.status === 'approved' ? 'Утверждено' : m.status === 'pending' ? 'Ожидает' : 'Отклонено'}
-                                                    color={m.status === 'approved' ? 'success' : m.status === 'pending' ? 'warning' : 'error'}
-                                                    variant={m.status === 'pending' ? 'filled' : 'outlined'}
-                                                    sx={{fontSize: '0.65rem', height: 20}}
-                                                />
-                                            </TableCell>
-                                            <TableCell sx={{maxWidth: 220}}>
-                                                <Typography sx={{fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 'bold', color: '#1565c0'}}>
-                                                    {m.agsk_code || '—'}
-                                                </Typography>
-                                                {m.agsk_full_name && (
-                                                    <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.3, mt: 0.25}}>
-                                                        {m.agsk_full_name}
+                        {/* Группированный вид: один блок = один АГСК со всеми ЕНСТРУ */}
+                        {matchesLoading && <LinearProgress sx={{mb: 1}}/>}
+
+                        {matchesLibrary.length === 0 && !matchesLoading && (
+                            <Paper sx={{p: 4, textAlign: 'center', borderRadius: 2, border: '1px solid #e0e0e0'}}>
+                                <Typography variant="body2" color="text.secondary">Нет сопоставлений</Typography>
+                            </Paper>
+                        )}
+
+                        <Stack spacing={1.5}>
+                            {(() => {
+                                // Группируем по agsk_code
+                                const groups: Record<string, AgskEnstruMatchItem[]> = {};
+                                for (const m of matchesLibrary) {
+                                    if (!groups[m.agsk_code]) groups[m.agsk_code] = [];
+                                    groups[m.agsk_code].push(m);
+                                }
+                                return Object.entries(groups).map(([agskCode, items]) => {
+                                    const agskName = items[0]?.agsk_full_name;
+                                    const pendingCount = items.filter(i => i.status === 'pending').length;
+                                    const approvedCount = items.filter(i => i.status === 'approved').length;
+                                    const isGroupExpanded = expandedGroups.has(agskCode);
+                                    return (
+                                        <Paper key={agskCode} elevation={0} sx={{border: '1px solid #e0e0e0', borderRadius: 2, overflow: 'hidden'}}>
+                                            {/* Заголовок группы АГСК */}
+                                            <Box
+                                                onClick={() => setExpandedGroups(prev => {
+                                                    const next = new Set(prev);
+                                                    if (next.has(agskCode)) next.delete(agskCode); else next.add(agskCode);
+                                                    return next;
+                                                })}
+                                                sx={{
+                                                    px: 2, py: 1.25, display: 'flex', alignItems: 'center', gap: 1.5,
+                                                    bgcolor: '#f5f7fa', cursor: 'pointer',
+                                                    borderBottom: isGroupExpanded ? '1px solid #e0e0e0' : 'none',
+                                                    '&:hover': {bgcolor: '#eef1f6'},
+                                                }}
+                                            >
+                                                <AgskIcon sx={{color: '#1565c0', fontSize: 18, flexShrink: 0}}/>
+                                                <Box sx={{flex: 1, minWidth: 0}}>
+                                                    <Typography sx={{fontFamily: 'monospace', fontWeight: 'bold', fontSize: '0.85rem', color: '#1565c0', lineHeight: 1.2}}>
+                                                        {agskCode}
                                                     </Typography>
-                                                )}
-                                            </TableCell>
-                                            <TableCell sx={{maxWidth: 280}}>
-                                                <Typography sx={{fontSize: '0.8rem', fontWeight: 'bold', color: 'primary.main'}}>
-                                                    {m.enstru_code}
-                                                </Typography>
-                                                {m.enstru_name_rus && (
-                                                    <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.3, mt: 0.25}}>
-                                                        {m.enstru_name_rus}
-                                                    </Typography>
-                                                )}
-                                                {m.enstru_detail_rus && (
-                                                    <Typography variant="caption" color="text.disabled" sx={{display: 'block', lineHeight: 1.3, fontStyle: 'italic'}}>
-                                                        {m.enstru_detail_rus}
-                                                    </Typography>
-                                                )}
-                                                {m.enstru_standard && (
-                                                    <Typography variant="caption" sx={{display: 'block', color: '#78909c', fontSize: '0.6rem'}}>
-                                                        {m.enstru_standard}
-                                                    </Typography>
-                                                )}
-                                            </TableCell>
-                                            <TableCell>
-                                                <Typography variant="caption">{m.analyst_name}</Typography>
-                                                {m.approved_by_name && (
-                                                    <Typography variant="caption" color="success.main" sx={{display: 'block', fontSize: '0.6rem'}}>
-                                                        ✓ {m.approved_by_name}
-                                                    </Typography>
-                                                )}
-                                            </TableCell>
-                                            <TableCell>
-                                                <Typography variant="caption" color="text.secondary">
-                                                    {m.created_at ? new Date(m.created_at).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'}
-                                                </Typography>
-                                            </TableCell>
-                                            {isAnalystManager && (
-                                                <TableCell align="right">
-                                                    {m.status === 'pending' && (
-                                                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                                                            <Button
-                                                                size="small" variant="contained" color="success"
-                                                                disabled={approvingId === m.id}
-                                                                onClick={() => approveMatch(m.id)}
-                                                                sx={{textTransform: 'none', fontSize: '0.7rem', py: 0.25, minWidth: 80}}
-                                                                startIcon={approvingId === m.id ? <CircularProgress size={12} color="inherit"/> : null}
-                                                            >
-                                                                Утвердить
-                                                            </Button>
-                                                            <Button
-                                                                size="small" variant="outlined" color="error"
-                                                                disabled={approvingId === m.id}
-                                                                onClick={() => rejectMatch(m.id)}
-                                                                sx={{textTransform: 'none', fontSize: '0.7rem', py: 0.25, minWidth: 80}}
-                                                            >
-                                                                Отклонить
-                                                            </Button>
-                                                        </Stack>
+                                                    {agskName && (
+                                                        <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.3, mt: 0.25, wordBreak: 'break-word'}}>
+                                                            {agskName}
+                                                        </Typography>
                                                     )}
-                                                    {m.status !== 'pending' && (
-                                                        <Typography variant="caption" color="text.disabled">—</Typography>
+                                                </Box>
+                                                <Stack direction="row" spacing={0.5} alignItems="center" sx={{flexShrink: 0}}>
+                                                    {pendingCount > 0 && (
+                                                        <Chip size="small" label={`${pendingCount} ожидает`} color="warning" sx={{fontSize: '0.65rem', height: 20}}/>
                                                     )}
-                                                </TableCell>
+                                                    {approvedCount > 0 && (
+                                                        <Chip size="small" label={`${approvedCount} утв.`} color="success" variant="outlined" sx={{fontSize: '0.65rem', height: 20}}/>
+                                                    )}
+                                                    <Chip size="small" label={`${items.length} ЕНСТРУ`} variant="outlined" sx={{fontSize: '0.65rem', height: 20}}/>
+                                                    <IconButton size="small" sx={{p: 0.25}}>
+                                                        {isGroupExpanded ? <ExpandLessIcon fontSize="small"/> : <ExpandMoreIcon fontSize="small"/>}
+                                                    </IconButton>
+                                                </Stack>
+                                            </Box>
+
+                                            {/* Список ЕНСТРУ сопоставлений */}
+                                            {isGroupExpanded && (
+                                                <Box>
+                                                    {items.map((m, idx) => (
+                                                        <Box key={m.id} sx={{
+                                                            px: 2, py: 1.25,
+                                                            borderBottom: idx < items.length - 1 ? '1px solid #f0f0f0' : 'none',
+                                                            bgcolor: m.status === 'approved' ? '#f1f8e9' : m.status === 'rejected' ? '#fff8f8' : 'white',
+                                                            display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap',
+                                                        }}>
+                                                            {/* Статус */}
+                                                            <Box sx={{width: 80, flexShrink: 0, pt: 0.25}}>
+                                                                <Chip
+                                                                    size="small"
+                                                                    label={m.status === 'approved' ? 'Утв.' : m.status === 'pending' ? 'Ожидает' : 'Откл.'}
+                                                                    color={m.status === 'approved' ? 'success' : m.status === 'pending' ? 'warning' : 'error'}
+                                                                    variant={m.status === 'pending' ? 'filled' : 'outlined'}
+                                                                    sx={{fontSize: '0.65rem', height: 20}}
+                                                                />
+                                                            </Box>
+
+                                                            {/* ЕНСТРУ */}
+                                                            <Box sx={{flex: 1, minWidth: 180}}>
+                                                                <Typography sx={{fontSize: '0.82rem', fontWeight: 'bold', color: 'primary.main', lineHeight: 1.2}}>
+                                                                    {m.enstru_code}
+                                                                </Typography>
+                                                                {m.enstru_name_rus && (
+                                                                    <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.35, mt: 0.25, wordBreak: 'break-word'}}>
+                                                                        {m.enstru_name_rus}
+                                                                    </Typography>
+                                                                )}
+                                                                {m.enstru_detail_rus && (
+                                                                    <Typography variant="caption" color="text.disabled" sx={{display: 'block', lineHeight: 1.3, fontStyle: 'italic', wordBreak: 'break-word'}}>
+                                                                        {m.enstru_detail_rus}
+                                                                    </Typography>
+                                                                )}
+                                                                {m.enstru_standard && (
+                                                                    <Typography variant="caption" sx={{display: 'block', color: '#78909c', fontSize: '0.6rem'}}>
+                                                                        {m.enstru_standard}
+                                                                    </Typography>
+                                                                )}
+                                                            </Box>
+
+                                                            {/* Аналитик + дата */}
+                                                            <Box sx={{width: 150, flexShrink: 0}}>
+                                                                <Typography variant="caption" sx={{display: 'flex', alignItems: 'center', gap: 0.5}}>
+                                                                    <PersonIcon sx={{fontSize: 12, color: 'text.secondary'}}/>
+                                                                    {m.analyst_name || '—'}
+                                                                </Typography>
+                                                                {m.approved_by_name && (
+                                                                    <Typography variant="caption" color="success.main" sx={{display: 'flex', alignItems: 'center', gap: 0.5, fontSize: '0.65rem'}}>
+                                                                        <CheckCircleIcon sx={{fontSize: 11}}/>
+                                                                        {m.approved_by_name}
+                                                                    </Typography>
+                                                                )}
+                                                                <Typography variant="caption" color="text.secondary" sx={{display: 'block', fontSize: '0.65rem', mt: 0.25}}>
+                                                                    {m.created_at ? new Date(m.created_at).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '—'}
+                                                                </Typography>
+                                                            </Box>
+
+                                                            {/* Кнопки действий (только для менеджера) */}
+                                                            {isAnalystManager && (
+                                                                <Box sx={{width: 180, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center'}}>
+                                                                    {m.status === 'pending' ? (
+                                                                        <Stack direction="row" spacing={0.5}>
+                                                                            <Button
+                                                                                size="small" variant="contained" color="success"
+                                                                                disabled={approvingId === m.id}
+                                                                                onClick={() => approveMatch(m.id)}
+                                                                                sx={{textTransform: 'none', fontSize: '0.7rem', py: 0.25, minWidth: 80}}
+                                                                                startIcon={approvingId === m.id ? <CircularProgress size={12} color="inherit"/> : null}
+                                                                            >
+                                                                                Утвердить
+                                                                            </Button>
+                                                                            <Button
+                                                                                size="small" variant="outlined" color="error"
+                                                                                disabled={approvingId === m.id}
+                                                                                onClick={() => rejectMatch(m.id)}
+                                                                                sx={{textTransform: 'none', fontSize: '0.7rem', py: 0.25, minWidth: 80}}
+                                                                            >
+                                                                                Отклонить
+                                                                            </Button>
+                                                                        </Stack>
+                                                                    ) : (
+                                                                        <Typography variant="caption" color="text.disabled">—</Typography>
+                                                                    )}
+                                                                </Box>
+                                                            )}
+                                                        </Box>
+                                                    ))}
+                                                </Box>
                                             )}
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </TableContainer>
+                                        </Paper>
+                                    );
+                                });
+                            })()}
+                        </Stack>
 
                         {/* Пагинация */}
                         {matchesLibraryTotal > LIBRARY_PAGE_SIZE && (
@@ -1729,6 +1874,272 @@ const PsdAnalystPage: React.FC = () => {
                         )}
                     </Box>
                 )}
+
+                {/* --- ДИАЛОГ СОЗДАНИЯ СВЯЗКИ АГСК→ЕНСТРУ --- */}
+                <Dialog open={createMatchOpen} onClose={() => { if (!creatingMatch) { setCreateMatchOpen(false); setNewMatchAgsk(null); setNewMatchEnstruList([]); setAgskInputVal(''); setEnstruInputVal(''); setExistingAgskMatches([]); } }}
+                        maxWidth="md" fullWidth PaperProps={{sx: {borderRadius: 2, minHeight: 460}}}>
+                    <DialogTitle sx={{pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                        <Typography fontWeight="bold" fontSize="1rem">Создать связку АГСК → ЕНСТРУ</Typography>
+                        <IconButton size="small" onClick={() => setCreateMatchOpen(false)} disabled={creatingMatch}>
+                            <CloseIcon fontSize="small"/>
+                        </IconButton>
+                    </DialogTitle>
+                    <DialogContent dividers sx={{pt: 2}}>
+                        <Typography variant="caption" color="text.secondary" sx={{display: 'block', mb: 2}}>
+                            Выберите АГСК и ЕНСТРУ для сопоставления. После создания связка будет отправлена на утверждение менеджеру.
+                        </Typography>
+
+                        <Box sx={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2.5, alignItems: 'start'}}>
+                            {/* ── Левая колонка: АГСК ── */}
+                            <Box>
+                                <Box sx={{display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75}}>
+                                    <AgskIcon sx={{fontSize: 16, color: '#1565c0'}}/>
+                                    <Typography variant="caption" fontWeight="bold" color="#1565c0">АГСК — код товара</Typography>
+                                </Box>
+                                <TextField
+                                    fullWidth size="small" placeholder="Код или название…"
+                                    value={agskInputVal}
+                                    onChange={e => { setAgskInputVal(e.target.value); if (newMatchAgsk) setNewMatchAgsk(null); }}
+                                    InputProps={{
+                                        endAdornment: agskSearchLoading ? <InputAdornment position="end"><CircularProgress size={14}/></InputAdornment> : null,
+                                    }}
+                                    sx={{mb: 0.5}}
+                                />
+                                {agskOptions.length > 0 && !newMatchAgsk && (
+                                    <Paper elevation={3} sx={{maxHeight: 260, overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 1}}>
+                                        {agskOptions.map(opt => {
+                                            const q = agskInputVal.toLowerCase();
+                                            const highlight = (text: string) => {
+                                                if (!q) return <>{text}</>;
+                                                const idx = text.toLowerCase().indexOf(q);
+                                                if (idx === -1) return <>{text}</>;
+                                                return <>{text.slice(0, idx)}<mark style={{background: '#fff176', borderRadius: 2, padding: '0 1px'}}>{text.slice(idx, idx + q.length)}</mark>{text.slice(idx + q.length)}</>;
+                                            };
+                                            return (
+                                                <Box key={opt.id}
+                                                    onClick={() => { setNewMatchAgsk({code: opt.code, full_name: opt.full_name || opt.name_ru}); setAgskInputVal(opt.code); setAgskOptions([]); }}
+                                                    sx={{px: 1.5, py: 1, cursor: 'pointer', '&:hover': {bgcolor: '#f5f5f5'}, borderBottom: '1px solid #f0f0f0'}}>
+                                                    <Typography sx={{fontFamily: 'monospace', fontSize: '0.82rem', fontWeight: 'bold', color: '#1565c0'}}>
+                                                        {highlight(opt.code)}
+                                                    </Typography>
+                                                    <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.35, wordBreak: 'break-word'}}>
+                                                        {highlight(opt.full_name || opt.name_ru)}
+                                                    </Typography>
+                                                </Box>
+                                            );
+                                        })}
+                                    </Paper>
+                                )}
+                                {newMatchAgsk && (
+                                    <Paper sx={{p: 1.25, mt: 0.5, bgcolor: '#e3f2fd', border: '1px solid #90caf9', borderRadius: 1, display: 'flex', gap: 1, alignItems: 'flex-start'}}>
+                                        <CheckCircleIcon sx={{color: '#1565c0', fontSize: 18, mt: 0.1, flexShrink: 0}}/>
+                                        <Box sx={{flex: 1, minWidth: 0}}>
+                                            <Typography sx={{fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 'bold', color: '#1565c0'}}>{newMatchAgsk.code}</Typography>
+                                            <Typography variant="caption" color="text.secondary" sx={{wordBreak: 'break-word'}}>{newMatchAgsk.full_name}</Typography>
+                                        </Box>
+                                        <IconButton size="small" sx={{p: 0.25, flexShrink: 0}} onClick={() => { setNewMatchAgsk(null); setAgskInputVal(''); }}>
+                                            <CloseIcon sx={{fontSize: 14}}/>
+                                        </IconButton>
+                                    </Paper>
+                                )}
+                            </Box>
+
+                            {/* ── Правая колонка: ЕНСТРУ ── */}
+                            <Box>
+                                <Box sx={{display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.75}}>
+                                    <CategoryIcon sx={{fontSize: 16, color: 'primary.main'}}/>
+                                    <Typography variant="caption" fontWeight="bold" color="primary.main">ЕНСТРУ — код закупки</Typography>
+                                    {existingAgskLoading && <CircularProgress size={12} sx={{ml: 0.5}}/>}
+                                </Box>
+
+                                {/* Уже существующие связки для этого АГСК */}
+                                {!newMatchAgsk && (
+                                    <Paper elevation={0} sx={{p: 1.5, border: '1px dashed #ddd', borderRadius: 1, mb: 1, textAlign: 'center'}}>
+                                        <Typography variant="caption" color="text.disabled">
+                                            Сначала выберите АГСК слева
+                                        </Typography>
+                                    </Paper>
+                                )}
+                                {newMatchAgsk && existingAgskMatches.length > 0 && (
+                                    <Paper elevation={0} sx={{border: '1px solid #e0e0e0', borderRadius: 1, mb: 1.5, overflow: 'hidden'}}>
+                                        <Box sx={{px: 1.25, py: 0.75, bgcolor: '#f5f5f5', borderBottom: '1px solid #e0e0e0'}}>
+                                            <Typography variant="caption" fontWeight="bold" color="text.secondary">
+                                                Уже в библиотеке ({existingAgskMatches.length})
+                                            </Typography>
+                                        </Box>
+                                        <Box sx={{maxHeight: 160, overflow: 'auto'}}>
+                                            {existingAgskMatches.map(ex => {
+                                                const isRejected = ex.status === 'rejected';
+                                                const isActive = ex.status === 'pending' || ex.status === 'approved';
+                                                const alreadyInList = newMatchEnstruList.some(e => e.code === ex.enstru_code);
+                                                return (
+                                                    <Box key={ex.id} sx={{
+                                                        px: 1.25, py: 0.75,
+                                                        borderBottom: '1px solid #f0f0f0',
+                                                        display: 'flex', alignItems: 'flex-start', gap: 1,
+                                                        bgcolor: isRejected ? '#fff8f8' : isActive ? '#f9fffe' : 'white',
+                                                        opacity: isActive && !alreadyInList ? 0.85 : 1,
+                                                    }}>
+                                                        <Box sx={{flex: 1, minWidth: 0}}>
+                                                            <Typography sx={{fontSize: '0.78rem', fontWeight: 'bold',
+                                                                color: ex.status === 'approved' ? 'success.main' : ex.status === 'pending' ? 'warning.dark' : 'error.main',
+                                                                lineHeight: 1.2}}>
+                                                                {ex.enstru_code}
+                                                            </Typography>
+                                                            {ex.enstru_name_rus && (
+                                                                <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.3, wordBreak: 'break-word'}}>
+                                                                    {ex.enstru_name_rus}
+                                                                </Typography>
+                                                            )}
+                                                            {ex.enstru_detail_rus && (
+                                                                <Typography variant="caption" color="text.disabled" sx={{display: 'block', lineHeight: 1.3, fontStyle: 'italic', wordBreak: 'break-word'}}>
+                                                                    {ex.enstru_detail_rus}
+                                                                </Typography>
+                                                            )}
+                                                        </Box>
+                                                        <Box sx={{flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.25}}>
+                                                            <Chip size="small"
+                                                                label={ex.status === 'approved' ? 'Утв.' : ex.status === 'pending' ? 'Ожидает' : 'Откл.'}
+                                                                color={ex.status === 'approved' ? 'success' : ex.status === 'pending' ? 'warning' : 'error'}
+                                                                variant="outlined"
+                                                                sx={{fontSize: '0.6rem', height: 18}}
+                                                            />
+                                                            {isRejected && !alreadyInList && (
+                                                                <Typography
+                                                                    variant="caption"
+                                                                    sx={{color: 'primary.main', cursor: 'pointer', fontSize: '0.65rem', textDecoration: 'underline', mt: 0.25}}
+                                                                    onClick={() => {
+                                                                        setNewMatchEnstruList(prev => [...prev, {code: ex.enstru_code, name_rus: ex.enstru_name_rus || ex.enstru_code}]);
+                                                                    }}
+                                                                >
+                                                                    + Повторить
+                                                                </Typography>
+                                                            )}
+                                                            {alreadyInList && (
+                                                                <Typography variant="caption" color="success.main" sx={{fontSize: '0.65rem'}}>
+                                                                    ✓ добавлен
+                                                                </Typography>
+                                                            )}
+                                                        </Box>
+                                                    </Box>
+                                                );
+                                            })}
+                                        </Box>
+                                    </Paper>
+                                )}
+                                {newMatchAgsk && existingAgskMatches.length === 0 && !existingAgskLoading && (
+                                    <Paper elevation={0} sx={{px: 1.25, py: 0.75, border: '1px solid #e8f5e9', borderRadius: 1, mb: 1.5, bgcolor: '#f9fffe'}}>
+                                        <Typography variant="caption" color="success.main">
+                                            Нет существующих связок — можно добавить новые
+                                        </Typography>
+                                    </Paper>
+                                )}
+                                <TextField
+                                    fullWidth size="small" placeholder="Код или название…"
+                                    value={enstrupInputVal}
+                                    onChange={e => { setEnstruInputVal(e.target.value); }}
+                                    InputProps={{
+                                        endAdornment: enstrupSearchLoading ? <InputAdornment position="end"><CircularProgress size={14}/></InputAdornment> : null,
+                                    }}
+                                    sx={{mb: 0.5}}
+                                />
+                                {enstrupOptions.length > 0 && (
+                                    <Paper elevation={3} sx={{maxHeight: 220, overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 1, mb: 1}}>
+                                        {enstrupOptions.map(opt => {
+                                            const alreadyAdded = newMatchEnstruList.some(e => e.code === opt.code);
+                                            const existingActive = existingAgskMatches.find(ex => ex.enstru_code === opt.code && (ex.status === 'pending' || ex.status === 'approved'));
+                                            const isBlocked = alreadyAdded || !!existingActive;
+                                            const q = enstrupInputVal.toLowerCase();
+                                            const highlight = (text: string) => {
+                                                if (!q) return <>{text}</>;
+                                                const idx = text.toLowerCase().indexOf(q);
+                                                if (idx === -1) return <>{text}</>;
+                                                return <>{text.slice(0, idx)}<mark style={{background: '#fff176', borderRadius: 2, padding: '0 1px'}}>{text.slice(idx, idx + q.length)}</mark>{text.slice(idx + q.length)}</>;
+                                            };
+                                            return (
+                                                <Box key={opt.id}
+                                                    onClick={() => {
+                                                        if (!isBlocked) {
+                                                            setNewMatchEnstruList(prev => [...prev, {code: opt.code, name_rus: opt.name_rus}]);
+                                                            setEnstruInputVal('');
+                                                            setEnstruOptions([]);
+                                                        }
+                                                    }}
+                                                    sx={{
+                                                        px: 1.5, py: 1,
+                                                        cursor: isBlocked ? 'default' : 'pointer',
+                                                        bgcolor: alreadyAdded ? '#f1f8e9' : existingActive ? '#fffde7' : 'white',
+                                                        '&:hover': {bgcolor: isBlocked ? (alreadyAdded ? '#f1f8e9' : '#fffde7') : '#f5f5f5'},
+                                                        borderBottom: '1px solid #f0f0f0',
+                                                        display: 'flex', alignItems: 'flex-start', gap: 1,
+                                                    }}>
+                                                    <Box sx={{flex: 1, minWidth: 0}}>
+                                                        <Typography sx={{fontSize: '0.82rem', fontWeight: 'bold',
+                                                            color: alreadyAdded ? 'success.main' : existingActive ? 'warning.dark' : 'primary.main'}}>
+                                                            {highlight(opt.code)}
+                                                        </Typography>
+                                                        <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.35, wordBreak: 'break-word'}}>
+                                                            {highlight(opt.name_rus)}
+                                                        </Typography>
+                                                        {opt.detail_rus && (
+                                                            <Typography variant="caption" color="text.disabled" sx={{display: 'block', fontStyle: 'italic', lineHeight: 1.3, wordBreak: 'break-word'}}>
+                                                                {highlight(opt.detail_rus)}
+                                                            </Typography>
+                                                        )}
+                                                        {existingActive && (
+                                                            <Typography variant="caption" sx={{color: 'warning.dark', fontSize: '0.65rem'}}>
+                                                                уже {existingActive.status === 'approved' ? 'утверждена' : 'на рассмотрении'}
+                                                            </Typography>
+                                                        )}
+                                                    </Box>
+                                                    {alreadyAdded && <CheckCircleIcon sx={{fontSize: 16, color: 'success.main', flexShrink: 0, mt: 0.25}}/>}
+                                                    {existingActive && !alreadyAdded && <InfoIcon sx={{fontSize: 16, color: 'warning.main', flexShrink: 0, mt: 0.25}}/>}
+                                                </Box>
+                                            );
+                                        })}
+                                    </Paper>
+                                )}
+
+                                {/* Выбранные ЕНСТРУ — список чипов */}
+                                {newMatchEnstruList.length > 0 && (
+                                    <Paper sx={{p: 1, border: '1px solid #a5d6a7', borderRadius: 1, bgcolor: '#f9fffe'}} elevation={0}>
+                                        <Typography variant="caption" fontWeight="bold" color="success.main" sx={{display: 'block', mb: 0.75}}>
+                                            Выбрано ({newMatchEnstruList.length}):
+                                        </Typography>
+                                        <Stack spacing={0.5}>
+                                            {newMatchEnstruList.map(e => (
+                                                <Box key={e.code} sx={{display: 'flex', alignItems: 'flex-start', gap: 0.5, bgcolor: '#e8f5e9', borderRadius: 1, px: 1, py: 0.5}}>
+                                                    <Box sx={{flex: 1, minWidth: 0}}>
+                                                        <Typography sx={{fontSize: '0.78rem', fontWeight: 'bold', color: 'primary.main', lineHeight: 1.2}}>{e.code}</Typography>
+                                                        <Typography variant="caption" color="text.secondary" sx={{display: 'block', lineHeight: 1.3, wordBreak: 'break-word'}}>{e.name_rus}</Typography>
+                                                    </Box>
+                                                    <IconButton size="small" sx={{p: 0.1, flexShrink: 0, mt: 0.1}}
+                                                        onClick={() => setNewMatchEnstruList(prev => prev.filter(x => x.code !== e.code))}>
+                                                        <CloseIcon sx={{fontSize: 13}}/>
+                                                    </IconButton>
+                                                </Box>
+                                            ))}
+                                        </Stack>
+                                    </Paper>
+                                )}
+                            </Box>
+                        </Box>
+                    </DialogContent>
+                    <DialogActions sx={{px: 2, py: 1.5}}>
+                        <Button onClick={() => { setCreateMatchOpen(false); setNewMatchAgsk(null); setNewMatchEnstruList([]); setAgskInputVal(''); setEnstruInputVal(''); setExistingAgskMatches([]); }} disabled={creatingMatch} sx={{textTransform: 'none'}}>
+                            Отмена
+                        </Button>
+                        <Button
+                            variant="contained" color="primary"
+                            disabled={!newMatchAgsk || newMatchEnstruList.length === 0 || creatingMatch}
+                            onClick={handleCreateMatch}
+                            startIcon={creatingMatch ? <CircularProgress size={14} color="inherit"/> : null}
+                            sx={{textTransform: 'none', fontWeight: 'bold'}}
+                        >
+                            Создать и отправить на утверждение
+                        </Button>
+                    </DialogActions>
+                </Dialog>
 
                 {/* --- ДИАЛОГИ ДИРЕКТОРА --- */}
                 <AssignDialog

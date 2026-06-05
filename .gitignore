@@ -29,9 +29,10 @@ npm-debug.log*
 /backend/uploads/*.xlsx
 /backend/uploads/*.kenml
 /backend/uploads/*.docx
-
+/backend/uploads
 # Документы
 /docs/Акт ввода СМР.docx
 
 # Игнорируем кэш alembic, но НЕ сами миграции — они должны быть в репозитории!
 /backend/alembic/versions/__pycache__/
+/backend/reports

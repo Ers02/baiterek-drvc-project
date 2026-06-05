@@ -74,14 +74,82 @@ class PsdLibraryMixin:
         db.refresh(match)
         return match
 
+    def create_match(self, db: Session, agsk_code: str, enstru_code: str, created_by: int) -> AgskEnstruMatch:
+        """Создаёт связку АГСК→ЕНСТРУ.
+        - Если активная (pending/approved) уже есть — raise ValueError.
+        - Если отклонённая (is_active=False) — реактивирует: сбрасывает approved, ставит нового автора.
+        """
+        # Проверяем активную
+        active = db.query(AgskEnstruMatch).filter(
+            AgskEnstruMatch.agsk_code == agsk_code,
+            AgskEnstruMatch.enstru_code == enstru_code,
+            AgskEnstruMatch.is_active == True,
+        ).first()
+        if active:
+            raise ValueError("Такая связка уже существует")
+
+        # Проверяем отклонённую — реактивируем
+        rejected = db.query(AgskEnstruMatch).filter(
+            AgskEnstruMatch.agsk_code == agsk_code,
+            AgskEnstruMatch.enstru_code == enstru_code,
+            AgskEnstruMatch.is_active == False,
+        ).order_by(AgskEnstruMatch.id.desc()).first()
+        if rejected:
+            rejected.is_active = True
+            rejected.is_approved = False
+            rejected.approved_by = None
+            rejected.approved_at = None
+            rejected.created_by = created_by
+            from sqlalchemy import func as sqlfunc
+            rejected.created_at = sqlfunc.now()
+            db.commit()
+            db.refresh(rejected)
+            return rejected
+
+        match = AgskEnstruMatch(agsk_code=agsk_code, enstru_code=enstru_code, created_by=created_by)
+        db.add(match)
+        db.commit()
+        db.refresh(match)
+        return match
+
+    def get_matches_by_agsk(self, db: Session, agsk_code: str) -> list:
+        """Возвращает все связки для данного АГСК (active + rejected) — для отображения в диалоге создания."""
+        matches = db.query(AgskEnstruMatch).filter(
+            AgskEnstruMatch.agsk_code == agsk_code,
+        ).order_by(AgskEnstruMatch.is_active.desc(), AgskEnstruMatch.is_approved.desc()).all()
+
+        enstru_codes = [m.enstru_code for m in matches if m.enstru_code]
+        enstru_map = {e.code: e for e in db.query(Enstru).filter(Enstru.code.in_(enstru_codes)).all()} if enstru_codes else {}
+
+        result = []
+        for m in matches:
+            enstru_obj = enstru_map.get(m.enstru_code)
+            if m.is_active and m.is_approved:
+                status = "approved"
+            elif m.is_active:
+                status = "pending"
+            else:
+                status = "rejected"
+            result.append({
+                "id": m.id,
+                "enstru_code": m.enstru_code,
+                "enstru_name_rus": enstru_obj.name_rus if enstru_obj else None,
+                "enstru_detail_rus": enstru_obj.detail_rus if enstru_obj else None,
+                "status": status,
+            })
+        return result
+
     def get_matches_library(
         self, db: Session,
         analyst_id: Optional[int] = None,
         date_filter: str = "all",    # "today" | "all"
+        search: Optional[str] = None,
+        status_filter: Optional[str] = None,  # "pending" | "approved" | "rejected" | None
         skip: int = 0,
         limit: int = 100,
     ) -> Dict:
         """Возвращает глобальную библиотеку АГСК→ЕНСТРУ сопоставлений."""
+        from sqlalchemy import or_
         query = db.query(AgskEnstruMatch)
 
         if analyst_id:
@@ -90,6 +158,23 @@ class PsdLibraryMixin:
         if date_filter == "today":
             today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             query = query.filter(AgskEnstruMatch.created_at >= today_start)
+
+        if status_filter == "pending":
+            query = query.filter(AgskEnstruMatch.is_active == True, AgskEnstruMatch.is_approved == False)
+        elif status_filter == "approved":
+            query = query.filter(AgskEnstruMatch.is_active == True, AgskEnstruMatch.is_approved == True)
+        elif status_filter == "rejected":
+            query = query.filter(AgskEnstruMatch.is_active == False)
+
+        if search:
+            like = f"%{search}%"
+            # Ищем по коду АГСК или коду ЕНСТРУ (имена подтянем после)
+            query = query.filter(
+                or_(
+                    AgskEnstruMatch.agsk_code.ilike(like),
+                    AgskEnstruMatch.enstru_code.ilike(like),
+                )
+            )
 
         total = query.count()
         matches = query.order_by(desc(AgskEnstruMatch.created_at)).offset(skip).limit(limit).all()
