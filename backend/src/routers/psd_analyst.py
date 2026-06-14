@@ -10,7 +10,8 @@ import httpx
 from ..database.database import get_db
 from ..models import models
 from ..services.psd_analyst_service import PsdAnalystService
-from ..utils.auth import get_current_admin, get_current_user, get_current_director_or_admin, get_current_analyst_manager
+from ..utils.auth import (get_current_admin, get_current_user, get_current_director_or_admin,
+                           get_current_analyst_manager, get_current_library_approver)
 from ..schemas.psd import (
     ExternalDocumentSchema, PsdItemsResponse,
     SaveMatchRequest, AgskEnstruMatchesResponse, CreateAgskEnstruMatchRequest,
@@ -27,12 +28,13 @@ router = APIRouter(
 
 psd_service = PsdAnalystService()
 
+
 @router.post("/upload-test", response_model=ExternalDocumentSchema)
 async def upload_test_psd(
-    file: UploadFile = File(...),
-    project_name: str = Form(...),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+        file: UploadFile = File(...),
+        project_name: str = Form(...),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
 ):
     """
     Загрузка тестового файла. Сохраняется как один файл (zip или kenml).
@@ -41,19 +43,22 @@ async def upload_test_psd(
     os.makedirs(upload_dir, exist_ok=True)
 
     file_ext = os.path.splitext(file.filename)[1].lower()
-    if file_ext not in ['.kenml', '.zip']:
-        raise HTTPException(status_code=400, detail="Поддерживаются только файлы .kenml и .zip")
+    if file_ext not in ['.kenml', '.zip', '.xlsx']:
+        raise HTTPException(status_code=400, detail="Поддерживаются только файлы .kenml, .zip и .xlsx")
+
+    # Определяем тип документа по расширению
+    doc_type = "SMETA" if file_ext == '.xlsx' else "PSD"
 
     unique_filename = f"test_{uuid.uuid4().hex}{file_ext}"
     file_path = os.path.join(upload_dir, unique_filename)
 
-    # Сохраняем ОДИН файл (архив или kenml)
+    # Сохраняем файл
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     # Создаем запись в БД
     doc = models.ExternalDocument(
-        doc_type="PSD",
+        doc_type=doc_type,
         bank_name=f"[ТЕСТ] {project_name}",
         received_at=datetime.now(timezone.utc),
         file_path=file_path,
@@ -67,9 +72,12 @@ async def upload_test_psd(
     db.commit()
     db.refresh(doc)
 
-    # Запускаем парсинг (сервис теперь сам разберется, ZIP это или KENML)
+    # Запускаем парсинг нужным парсером
     try:
-        psd_service.parse_psd_file(db, doc.id, file_path)
+        if doc_type == "SMETA":
+            psd_service.parse_smeta_file(db, doc.id, file_path)
+        else:
+            psd_service.parse_psd_file(db, doc.id, file_path)
         return doc
     except Exception as e:
         doc.status = "ERROR"
@@ -77,45 +85,47 @@ async def upload_test_psd(
         db.commit()
         raise HTTPException(status_code=500, detail=f"Ошибка парсинга: {str(e)}")
 
+
 @router.get("/documents")
 def get_psd_documents(
-    doc_status: Optional[str] = Query(None, alias="status"),
-    assigned_to_me: bool = Query(False),
-    is_test: Optional[bool] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+        doc_status: Optional[str] = Query(None, alias="status"),
+        assigned_to_me: bool = Query(False),
+        is_test: Optional[bool] = Query(None),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
 ):
     query = db.query(models.ExternalDocument).options(joinedload(models.ExternalDocument.assigned_user))
     # Показываем все документы: PSD и SMETA
 
     if doc_status:
         query = query.filter(models.ExternalDocument.status == doc_status)
-    
+
     if assigned_to_me:
         query = query.filter(models.ExternalDocument.assigned_to == current_user.id)
-    
+
     if is_test is not None:
         query = query.filter(models.ExternalDocument.is_test == is_test)
     else:
         query = query.filter(models.ExternalDocument.is_test == False)
-        
+
     docs = query.order_by(models.ExternalDocument.received_at.desc()).all()
-    
+
     result = []
     for doc in docs:
         doc_dict = {c.name: getattr(doc, c.name) for c in doc.__table__.columns}
         doc_dict["assigned_user_name"] = doc.assigned_user.full_name if doc.assigned_user else None
         result.append(doc_dict)
-        
+
     return result
+
 
 @router.post("/documents/{doc_id}/assign-analyst")
 def assign_to_analyst(
-    doc_id: int,
-    analyst_id: int = Query(...),
-    days: int = Query(5, ge=1, le=10, description="Срок в рабочих днях (1-10)"),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_director_or_admin)
+        doc_id: int,
+        analyst_id: int = Query(...),
+        days: int = Query(5, ge=1, le=10, description="Срок в рабочих днях (1-10)"),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_director_or_admin)
 ):
     """Директор назначает аналитика и срок выполнения."""
     if days < 1 or days > 10:
@@ -126,11 +136,12 @@ def assign_to_analyst(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.post("/documents/{doc_id}/submit-approval")
 def submit_for_approval(
-    doc_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+        doc_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
 ):
     """Аналитик отправляет на утверждение директору.
     Блокируется если есть GOODS-позиции:
@@ -200,11 +211,12 @@ def submit_for_approval(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.post("/documents/{doc_id}/approve")
 def approve_document(
-    doc_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_director_or_admin)
+        doc_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_director_or_admin)
 ):
     """Директор утверждает документ. Генерируется финальный ZIP."""
     try:
@@ -213,12 +225,13 @@ def approve_document(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.post("/documents/{doc_id}/reject")
 def reject_document(
-    doc_id: int, 
-    comment: str = Body(..., embed=True),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_director_or_admin)
+        doc_id: int,
+        comment: str = Body(..., embed=True),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_director_or_admin)
 ):
     """Директор возвращает на доработку с комментарием."""
     try:
@@ -227,12 +240,13 @@ def reject_document(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.post("/delegate")
 def delegate_authority(
-    to_user_id: int = Query(...),
-    days: int = Query(14),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_director_or_admin)
+        to_user_id: int = Query(...),
+        days: int = Query(14),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_director_or_admin)
 ):
     """Директор делегирует права другому пользователю."""
     try:
@@ -241,11 +255,17 @@ def delegate_authority(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.get("/analysts", response_model=List[dict])
 def get_analysts_list(db: Session = Depends(get_db)):
-    """Список аналитиков для назначения."""
-    users = db.query(models.User).filter(models.User.role == models.UserRole.ANALYST_DRVC).all()
-    return [{"id": u.id, "full_name": u.full_name} for u in users]
+    """Список для назначения и делегирования: аналитики + менеджеры аналитиков."""
+    roles = [models.UserRole.ANALYST_DRVC, models.UserRole.ANALYST_MANAGER]
+    users = db.query(models.User).filter(models.User.role.in_(roles)).order_by(models.User.full_name).all()
+    role_labels = {
+        models.UserRole.ANALYST_DRVC: "Аналитик",
+        models.UserRole.ANALYST_MANAGER: "Менеджер аналитиков",
+    }
+    return [{"id": u.id, "full_name": u.full_name, "role_label": role_labels.get(u.role, u.role)} for u in users]
 
 
 @router.get("/library-users", response_model=List[dict])
@@ -264,9 +284,17 @@ def get_library_users(db: Session = Depends(get_db)):
     }
     return [{"id": u.id, "full_name": u.full_name, "role_label": role_labels.get(u.role, u.role)} for u in users]
 
+
+@router.get("/documents/{doc_id}/stats")
+def get_document_stats(doc_id: int, db: Session = Depends(get_db)):
+    return psd_service.get_document_stats(db, doc_id)
+
+
 @router.get("/document-items/{doc_id}", response_model=PsdItemsResponse)
-def get_document_items(doc_id: int, only_unmatched: bool = False, search: Optional[str] = None, skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+def get_document_items(doc_id: int, only_unmatched: bool = False, search: Optional[str] = None, skip: int = 0,
+                       limit: int = 50, db: Session = Depends(get_db)):
     return psd_service.get_document_items_with_matches(db, doc_id, only_unmatched, search, skip, limit)
+
 
 @router.get("/document-items/{doc_id}/item/{item_id}")
 def get_document_item(doc_id: int, item_id: int, db: Session = Depends(get_db)):
@@ -367,7 +395,7 @@ def get_document_item(doc_id: int, item_id: int, db: Session = Depends(get_db)):
                 "dvc_percent": float(r.dvc_percent) if r.dvc_percent else None,
                 "times_selected": r.times_selected,
                 "last_selected_at": r.last_selected_at.isoformat() if r.last_selected_at else None,
-                "ktp_is_active": not is_inactive,   # False = поставщик стал неактивным
+                "ktp_is_active": not is_inactive,  # False = поставщик стал неактивным
             })
 
     return {
@@ -395,6 +423,7 @@ def get_document_item(doc_id: int, item_id: int, db: Session = Depends(get_db)):
         "previous_agsk_selections": previous_agsk_selections,
     }
 
+
 @router.get("/documents/{doc_id}/download-result")
 def download_result_zip(doc_id: int, db: Session = Depends(get_db)):
     doc = db.query(models.ExternalDocument).filter(models.ExternalDocument.id == doc_id).first()
@@ -406,6 +435,7 @@ def download_result_zip(doc_id: int, db: Session = Depends(get_db)):
         filename=f"Analysis_Result_{doc_id}.zip",
         media_type="application/zip"
     )
+
 
 @router.post("/documents/{doc_id}/parse")
 def parse_document(doc_id: int, db: Session = Depends(get_db)):
@@ -423,21 +453,23 @@ def parse_document(doc_id: int, db: Session = Depends(get_db)):
 
     return {"status": "success", "doc_type": doc.doc_type}
 
+
 @router.get("/search-enstru-reestr")
 def search_enstru_reestr(
-    query: str = Query(..., min_length=1),
-    search_mode: Literal["all", "agsk", "name"] = Query(default="all"),
-    limit: int = Query(default=20, le=100),
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        query: str = Query(..., min_length=1),
+        search_mode: Literal["all", "agsk", "name"] = Query(default="all"),
+        limit: int = Query(default=20, le=100),
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     return psd_service.search_enstru_in_reestr(db, query=query, limit=limit, search_mode=search_mode)
 
+
 @router.get("/export-full-report")
 def export_full_analysis_report(
-    doc_id: int = Query(..., description="Document ID to export"),
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+        doc_id: int = Query(..., description="Document ID to export"),
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
 ):
     file_path = psd_service.export_full_analysis_report(db, doc_id)
     if not file_path or not os.path.exists(file_path):
@@ -450,11 +482,12 @@ def export_full_analysis_report(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
+
 @router.get("/documents/{doc_id}/conclusion")
 def generate_conclusion_docx(
-    doc_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+        doc_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
 ):
     file_path = psd_service.generate_psd_conclusion_docx(db, doc_id, current_user)
     if not file_path or not os.path.exists(file_path):
@@ -467,12 +500,13 @@ def generate_conclusion_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
+
 @router.post("/documents/{doc_id}/analyst-comment")
 def save_analyst_comment(
-    doc_id: int,
-    comment: str = Body(..., embed=True),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+        doc_id: int,
+        comment: str = Body(..., embed=True),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
 ):
     """Аналитик сохраняет комментарий к заключению."""
     doc = db.query(models.ExternalDocument).filter(models.ExternalDocument.id == doc_id).first()
@@ -480,18 +514,20 @@ def save_analyst_comment(
         raise HTTPException(status_code=404, detail="Документ не найден")
 
     # Проверяем, что текущий пользователь назначен как аналитик или является админом/директором
-    if doc.assigned_to != current_user.id and current_user.role not in [models.UserRole.ADMIN, models.UserRole.DIRECTOR_DRVC]:
+    if doc.assigned_to != current_user.id and current_user.role not in [models.UserRole.ADMIN,
+                                                                        models.UserRole.DIRECTOR_DRVC]:
         raise HTTPException(status_code=403, detail="Нет прав для редактирования комментария")
 
     doc.analyst_comment = comment
     db.commit()
     return {"status": "success", "analyst_comment": comment}
 
+
 @router.post("/documents/{doc_id}/send-to-do")
 async def send_result_to_do(
-    doc_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_director_or_admin)
+        doc_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_director_or_admin)
 ):
     """
     Отправляет результат анализа (ZIP архив) в дочернюю организацию через callback_url.
@@ -504,10 +540,10 @@ async def send_result_to_do(
 
 @router.post("/document-items/{item_id}/save-match")
 def save_analyst_match(
-    item_id: int,
-    body: SaveMatchRequest,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+        item_id: int,
+        body: SaveMatchRequest,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
 ):
     """Аналитик выбирает поставщика из Реестра КТП для позиции ПСД.
     Создаёт запись в psd_item_supplier_selections + при необходимости в библиотеке."""
@@ -543,14 +579,14 @@ def save_analyst_match(
 
 @router.get("/matches", response_model=AgskEnstruMatchesResponse)
 def get_matches_library(
-    analyst_id: Optional[int] = Query(None),
-    date_filter: str = Query("all", description="'today' или 'all'"),
-    search: Optional[str] = Query(None, description="Поиск по коду АГСК или ЕНСТРУ"),
-    status_filter: Optional[str] = Query(None, description="pending | approved | rejected"),
-    skip: int = Query(0),
-    limit: int = Query(100, le=500),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+        analyst_id: Optional[int] = Query(None),
+        date_filter: str = Query("all", description="'today' или 'all'"),
+        search: Optional[str] = Query(None, description="Поиск по коду АГСК или ЕНСТРУ"),
+        status_filter: Optional[str] = Query(None, description="pending | approved | rejected"),
+        skip: int = Query(0),
+        limit: int = Query(100, le=500),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
 ):
     """Глобальная библиотека АГСК→ЕНСТРУ сопоставлений. Аналитик видит только свои."""
     if current_user.role == models.UserRole.ANALYST_DRVC:
@@ -558,11 +594,12 @@ def get_matches_library(
     return psd_service.get_matches_library(db, analyst_id, date_filter, search, status_filter, skip, limit)
 
 
-@router.post("/matches", response_model=AgskEnstruMatchesResponse.__annotations__['items'].__args__[0] if False else dict)
+@router.post("/matches",
+             response_model=AgskEnstruMatchesResponse.__annotations__['items'].__args__[0] if False else dict)
 def create_match(
-    payload: CreateAgskEnstruMatchRequest,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+        payload: CreateAgskEnstruMatchRequest,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
 ):
     """Создать новую связку АГСК→ЕНСТРУ вручную. Отправляется на утверждение менеджеру."""
     try:
@@ -574,9 +611,9 @@ def create_match(
 
 @router.get("/matches/by-agsk/{agsk_code}")
 def get_matches_by_agsk(
-    agsk_code: str,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+        agsk_code: str,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
 ):
     """Все связки для данного АГСК-кода (для диалога создания)."""
     return psd_service.get_matches_by_agsk(db, agsk_code)
@@ -584,9 +621,9 @@ def get_matches_by_agsk(
 
 @router.post("/matches/batch")
 def create_matches_batch(
-    payload: CreateAgskEnstruMatchBatchRequest,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+        payload: CreateAgskEnstruMatchBatchRequest,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
 ):
     """Создать несколько связок АГСК→ЕНСТРУ за раз. Каждая отправляется на утверждение."""
     if not payload.enstru_codes:
@@ -603,9 +640,9 @@ def create_matches_batch(
 
 @router.post("/matches/{match_id}/approve")
 def approve_match(
-    match_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_analyst_manager),
+        match_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_library_approver),
 ):
     """Менеджер утверждает сопоставление."""
     try:
@@ -617,9 +654,9 @@ def approve_match(
 
 @router.post("/matches/{match_id}/reject")
 def reject_match(
-    match_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_analyst_manager),
+        match_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_library_approver),
 ):
     """Менеджер отклоняет сопоставление."""
     try:
@@ -629,49 +666,82 @@ def reject_match(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/matches/{match_id}/revoke")
+def revoke_match(
+        match_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_director_or_admin),
+):
+    """Директор ДРВЦ убирает запись из утверждённой библиотеки."""
+    try:
+        psd_service.revoke_approved_match(db, match_id)
+        return {"status": "revoked", "match_id": match_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/documents/{doc_id}", status_code=200)
+def delete_document(
+        doc_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
+):
+    """Удаление тестового проекта. Прод-проекты (is_test=False) удалять нельзя."""
+    doc = db.query(models.ExternalDocument).filter(models.ExternalDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    if not doc.is_test:
+        raise HTTPException(status_code=403, detail="Удаление производственных проектов запрещено")
+
+    is_privileged = current_user.role in [
+        models.UserRole.ADMIN, models.UserRole.DIRECTOR_DRVC, models.UserRole.ANALYST_MANAGER
+    ]
+    if doc.assigned_to != current_user.id and not is_privileged:
+        raise HTTPException(status_code=403, detail="Нет прав для удаления этого проекта")
+
+    for path in [doc.file_path, doc.result_file_path]:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    db.delete(doc)
+    db.commit()
+    return {"status": "deleted", "doc_id": doc_id}
+
+
 @router.delete("/matches/{match_id}")
 def delete_match(
-    match_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+        match_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
 ):
     """Удаляет выбор поставщика (по ID из psd_item_supplier_selections).
-    Аналитик может удалить только свой выбор."""
+    Аналитик может удалить только свой выбор; админ/менеджер — любой."""
     sel = db.query(models.PsdItemSupplierSelection).filter(
         models.PsdItemSupplierSelection.id == match_id
     ).first()
     if not sel:
         raise HTTPException(status_code=404, detail="Выбор поставщика не найден")
-    if sel.selected_by != current_user.id and current_user.role not in [
-        models.UserRole.ADMIN, models.UserRole.ANALYST_MANAGER
-    ]:
+    is_privileged = current_user.role in [models.UserRole.ADMIN, models.UserRole.ANALYST_MANAGER]
+    if sel.selected_by != current_user.id and not is_privileged:
         raise HTTPException(status_code=403, detail="Нет прав для удаления этого выбора")
-
-    item_id = sel.item_id
-    sel.is_active = False
-    db.flush()
-
-    # Если активных выборов не осталось — откатываем match_type позиции
-    remaining = db.query(models.PsdItemSupplierSelection).filter(
-        models.PsdItemSupplierSelection.item_id == item_id,
-        models.PsdItemSupplierSelection.is_active == True,
-    ).count()
-    if remaining == 0:
-        item = db.query(models.PsdDocumentItem).filter(models.PsdDocumentItem.id == item_id).first()
-        if item:
-            item.match_type = 'suggested' if item.enstru_code else 'none'
-            item.match_reason = 'Подсказка из библиотеки — поставщик удалён, выберите нового из реестра КТП'
-
-    db.commit()
+    try:
+        # Передаём selected_by чтобы проверка прав в сервисе прошла;
+        # выше уже проверили, что текущий пользователь имеет право на удаление.
+        psd_service.remove_supplier_selection(db, match_id, sel.selected_by)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"status": "deleted", "match_id": match_id}
 
 
 @router.post("/document-items/{item_id}/not-in-ktp-registry")
 def save_not_in_ktp_registry(
-    item_id: int,
-    value: bool = Body(..., embed=True, description="true - нет в реестре КТП, false - сбросить"),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+        item_id: int,
+        value: bool = Body(..., embed=True, description="true - нет в реестре КТП, false - сбросить"),
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
 ):
     """
     Отмечает позицию как "Нет в реестре КТП".

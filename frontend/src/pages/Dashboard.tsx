@@ -14,7 +14,6 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n/index.tsx';
-import Header from '../components/Header';
 import {
   getPlans, deletePlan, createPlan, deleteLatestVersion, exportVersionToExcel, createVersion,
   PlanStatus
@@ -264,7 +263,7 @@ export default function Dashboard() {
   const [isCreateDialogOpen, setCreateDialogOpen] = useState(false);
   const [newPlanName, setNewPlanName] = useState('');
   const [newPlanYear, setNewPlanYear] = useState(new Date().getFullYear());
-  
+
   const [currentTab, setCurrentTab] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -327,8 +326,8 @@ export default function Dashboard() {
 
     if (searchQuery) {
         const lowerQuery = searchQuery.toLowerCase();
-        filtered = filtered.filter(plan => 
-            plan.plan_name.toLowerCase().includes(lowerQuery) || 
+        filtered = filtered.filter(plan =>
+            plan.plan_name.toLowerCase().includes(lowerQuery) ||
             plan.year.toString().includes(lowerQuery)
         );
     }
@@ -353,7 +352,6 @@ export default function Dashboard() {
 
   return (
     <>
-      <Header />
       <Container maxWidth={false} sx={{ py: 4, px: { xs: 2, md: 4 } }}>
         <Box sx={{
           display: 'flex',

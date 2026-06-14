@@ -95,52 +95,48 @@ class PsdAnalystService(
 
     @staticmethod
     def _calc_min_dvc(item, direct_ktp_map, group_ktp_map, suppliers_map,
-                      agsk_all_map: Optional[Dict] = None) -> Decimal:
-        """Return minimum DVC% for a PsdDocumentItem using pre-built lookup maps.
+                      agsk_all_map: Optional[Dict] = None,
+                      selections_by_item: Optional[Dict] = None) -> Decimal:
+        """Return minimum DVC% for a PsdDocumentItem.
 
-        Для позиций auto/auto_ktp (АГСК напрямую в реестре КТП) используем
-        agsk_all_map — только поставщиков с совпадающим АГСК, игнорируем ЕНСТРУ.
-        Для остальных позиций берём поставщиков по ЕНСТРУ (suppliers_map).
+        ВЦ% строго согласован с колонкой «КТП» листа 1 — считается ТОЛЬКО для
+        реально сопоставленных позиций:
+          • работы/услуги           → 100% (по типу);
+          • выбор аналитика          → минимум ДВС среди выбранных поставщиков;
+          • авто (АГСК прямо в КТП)  → минимум ДВС поставщиков с этим АГСК;
+          • подсказка / нет совпадения (suggested/none) → 0 (КТП = Нет).
+
+        Параметры direct_ktp_map/group_ktp_map/suppliers_map больше не участвуют
+        в расчёте (оставлены для совместимости сигнатуры).
         """
         itype = item.item_type or 'GOODS'
         if itype in ('WORKS', 'SERVICES'):
             return Decimal('100')
+
+        is_auto = getattr(item, 'match_type', None) == 'auto_ktp'
         all_vals = []
 
-        is_auto = getattr(item, 'match_type', None) in ('auto', 'auto_ktp')
+        # Выборы аналитика — берём для ЛЮБОГО типа сопоставления
+        if selections_by_item and selections_by_item.get(item.id):
+            for s in selections_by_item[item.id]:
+                if s.dvc_percent and float(s.dvc_percent) > 0:
+                    all_vals.append(float(s.dvc_percent))
 
+        # Авто-позиции: добавляем КТП-значения к уже собранным выборам аналитика
         if is_auto and agsk_all_map is not None and item.code_sn:
-            # Авто: только поставщики с прямым совпадением АГСК
             for ktp_r in agsk_all_map.get(item.code_sn, []):
                 if ktp_r.dvc_percent:
                     try:
-                        v = float(re.sub(r'[^0-9.]', '', ktp_r.dvc_percent).replace(',', '.'))
+                        v = float(re.sub(r'[^0-9.]', '', str(ktp_r.dvc_percent)).replace(',', '.'))
                         if v > 0:
                             all_vals.append(v)
                     except Exception:
                         pass
-        else:
-            # Не-авто: сначала прямое совпадение АГСК (для дополнительной точности),
-            # затем все поставщики по ЕНСТРУ
-            for ktp_r in [direct_ktp_map.get(item.code_sn), group_ktp_map.get(item.code_sn)]:
-                if ktp_r and ktp_r.dvc_percent:
-                    try:
-                        v = float(re.sub(r'[^0-9.]', '', ktp_r.dvc_percent).replace(',', '.'))
-                        if v > 0:
-                            all_vals.append(v)
-                    except Exception:
-                        pass
-            if item.enstru_code:
-                for s in suppliers_map.get(item.enstru_code, []):
-                    if s.dvc_percent:
-                        try:
-                            v = float(re.sub(r'[^0-9.]', '', s.dvc_percent).replace(',', '.'))
-                            if v > 0:
-                                all_vals.append(v)
-                        except Exception:
-                            pass
 
-        return Decimal(str(min(all_vals))) if all_vals else Decimal('0')
+        # Для не-авто позиций без выборов → КТП = Нет → ВЦ = 0
+        if not all_vals:
+            return Decimal('0')
+        return Decimal(str(min(all_vals)))
 
     @staticmethod
     def _calculate_deadline(start_date: datetime, business_days: int) -> datetime:

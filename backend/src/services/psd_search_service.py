@@ -70,11 +70,25 @@ class PsdSearchMixin:
         }
 
     def _run_auto_matching_for_document(self, db: Session, doc_id: int):
-        from .agsk_enstru_matcher import AgskEnstruMatcher
         items = db.query(PsdDocumentItem).filter(PsdDocumentItem.document_id == doc_id).all()
+        agsk_codes = list({it.code_sn for it in items if it.code_sn})
 
-        # Bulk-load утверждённых сопоставлений из проверенной библиотеки
-        agsk_codes = [it.code_sn for it in items if it.code_sn]
+        # ── Bulk-1: точное совпадение кода АГСК в jsonb agsk3_codes реестра КТП ──
+        # Это основа АВТО-сопоставления: код АГСК из ПСД 1-в-1 присутствует
+        # в активной записи реестра. Один запрос вместо тысяч per-item.
+        agsk_exact_map: Dict[str, Any] = {}
+        if agsk_codes:
+            ktp_rows = db.query(Reestr_KTP).filter(
+                Reestr_KTP.is_active.isnot(False),
+                or_(*[Reestr_KTP.agsk3_codes.contains([c]) for c in agsk_codes]),
+            ).order_by(Reestr_KTP.id).all()
+            agsk_set = set(agsk_codes)
+            for ktp in ktp_rows:
+                for ac in (ktp.agsk3_codes or []):
+                    if ac in agsk_set and ac not in agsk_exact_map:
+                        agsk_exact_map[ac] = ktp
+
+        # ── Bulk-2: утверждённая библиотека (для АГСК без прямого совпадения) ──
         approved_map: Dict[str, AgskEnstruMatch] = {}
         if agsk_codes:
             approved_rows = db.query(AgskEnstruMatch).filter(
@@ -82,37 +96,48 @@ class PsdSearchMixin:
                 AgskEnstruMatch.is_approved == True,
                 AgskEnstruMatch.is_active == True,
             ).order_by(AgskEnstruMatch.created_at.asc()).all()
-            # Последнее утверждённое по каждому АГСК (asc → последнее перезаписывает)
             for m in approved_rows:
                 approved_map[m.agsk_code] = m
 
-        # Bulk-load имён ЕНСТРУ для утверждённых кодов
-        approved_enstru_codes = list({m.enstru_code for m in approved_map.values()})
+        # ── Bulk-3: имена ЕНСТРУ из справочника (для авто и библиотеки) ────────
+        enstru_codes_needed: set = {m.enstru_code for m in approved_map.values()}
+        for ktp in agsk_exact_map.values():
+            if ktp.enstru_codes:
+                enstru_codes_needed.add(ktp.enstru_codes[0])
         enstru_name_map: Dict[str, str] = {}
-        if approved_enstru_codes:
+        if enstru_codes_needed:
             enstru_name_map = {
                 e.code: e.name_rus
-                for e in db.query(Enstru).filter(Enstru.code.in_(approved_enstru_codes)).all()
+                for e in db.query(Enstru).filter(Enstru.code.in_(enstru_codes_needed)).all()
             }
 
-        # Какие ЕНСТРУ из библиотеки и из самих позиций реально имеют активного
-        # поставщика в реестре КТП (с валидным ДВС). «💡 Подсказку» ставим
-        # ТОЛЬКО для них — иначе UI-поиск ничего не найдёт.
-        candidate_enstru = set(approved_enstru_codes)
+        # Какие ЕНСТРУ (из библиотеки и из самих позиций) реально имеют активного
+        # поставщика в реестре КТП. «💡 Подсказку» ставим ТОЛЬКО для них.
+        candidate_enstru = {m.enstru_code for m in approved_map.values()}
         for it in items:
             if it.enstru_code:
                 candidate_enstru.add(it.enstru_code)
         enstru_in_ktp = self._enstru_codes_with_active_supplier(db, candidate_enstru)
 
-        matcher = AgskEnstruMatcher(db)
         for item in items:
-            if not item.code_sn:
+            # ── ПРИОРИТЕТ 1: точное совпадение АГСК в реестре КТП → АВТО ────────
+            ktp = agsk_exact_map.get(item.code_sn) if item.code_sn else None
+            if ktp is not None:
+                enstru_code = ktp.enstru_codes[0] if ktp.enstru_codes else None
+                if enstru_code:
+                    item.enstru_code = enstru_code
+                    item.enstru_name = (
+                        enstru_name_map.get(enstru_code)
+                        or (ktp.enstru_names[0] if ktp.enstru_names else None)
+                    )
+                item.match_type = "auto_ktp"
+                item.match_score = 100
+                dvc = ktp.dvc_percent or "0"
+                item.match_reason = f"Точное совпадение кода АГСК в реестре КТП (Завод: {ktp.company_name}, ДВС: {dvc}%)"
                 continue
 
-            # Приоритет 1: утверждённая библиотека (проверено менеджером).
-            # Подсказку ставим только если в реестре КТП реально есть поставщик
-            # с этим ЕНСТРУ — иначе аналитику нечего выбирать.
-            approved = approved_map.get(item.code_sn)
+            # ── ПРИОРИТЕТ 2: утверждённая библиотека → подсказка ───────────────
+            approved = approved_map.get(item.code_sn) if item.code_sn else None
             if approved and approved.enstru_code in enstru_in_ktp:
                 item.enstru_code = approved.enstru_code
                 item.enstru_name = enstru_name_map.get(approved.enstru_code)
@@ -121,23 +146,17 @@ class PsdSearchMixin:
                 item.match_reason = "Подсказка из библиотеки — выберите поставщика из реестра КТП"
                 continue
 
-            # Приоритет 2: обычный авто-матчинг по АГСК → КТП
-            best = matcher.get_match_for_agsk(item.code_sn)
-            if best:
-                item.enstru_code = best["enstru_code"]
-                item.enstru_name = best["enstru_name"]
-                item.match_type = best["match_type"]
-                item.match_score = best["score"]
-                item.match_reason = best["reason"]
-            elif (item.enstru_code and item.match_type == "suggested"
-                  and item.enstru_code in enstru_in_ktp):
-                # ЕНСТРУ-подсказка из сметы — не трогаем, аналитик выберет поставщика
-                pass
-            else:
-                # Либо нет подсказки, либо ЕНСТРУ-подсказка осиротевшая (нет в КТП).
-                item.match_type = "none"
-                if item.enstru_code and item.match_type != "suggested":
-                    item.match_reason = "ЕНСТРУ из сметы, но в реестре КТП нет активных поставщиков"
+            # ── ПРИОРИТЕТ 3: ЕНСТРУ-подсказка из сметы ─────────────────────────
+            if item.enstru_code and item.enstru_code in enstru_in_ktp:
+                item.match_type = "suggested"
+                item.match_reason = "ЕНСТРУ из сметы — выберите поставщика из реестра КТП"
+                continue
+
+            # ── Иначе — не сопоставлено ────────────────────────────────────────
+            item.match_type = "none"
+            if item.enstru_code:
+                item.match_reason = "ЕНСТРУ из сметы, но в реестре КТП нет активных поставщиков"
+
         db.commit()
 
     def search_enstru_in_reestr(self, db: Session, query: str, limit: int = 20, search_mode: SearchMode = "all") -> List[Dict]:

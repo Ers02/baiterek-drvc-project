@@ -25,7 +25,7 @@ export interface AgskMatch {
     volume: number;
     enstru_code?: string;
     enstru_name?: string;
-    match_type: 'auto' | 'manual' | 'manual_ktp' | 'auto_ktp' | 'none' | 'suggested';
+    match_type: 'auto_ktp' | 'manual' | 'manual_ktp' | 'none' | 'suggested';
     match_score?: number;
     match_reason?: string;
     not_in_ktp_registry?: boolean;
@@ -59,6 +59,16 @@ export interface ReestrResult {
     kpved_names?: string[];
     tnved_codes?: string[];
     tnved_names?: string[];
+}
+
+export interface DocumentStats {
+    total_items: number;
+    total_amount: number;
+    by_type: Record<string, { count: number; amount: number }>;
+    goods_total: number;
+    goods_matched: number;
+    goods_dvc_percent: number;
+    goods_vc_amount: number;
 }
 
 export const SEARCH_TABS: { mode: SearchMode; label: string; placeholder: string }[] = [

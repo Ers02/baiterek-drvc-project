@@ -43,7 +43,6 @@ import {
     ExpandMore as ExpandMoreIcon
 } from '@mui/icons-material';
 import {useTranslation} from '../i18n';
-import Header from '../components/Header';
 import * as psdApi from './psd-analyst/api';
 import AssignDialog from './psd-analyst/dialogs/AssignDialog';
 import RejectDialog from './psd-analyst/dialogs/RejectDialog';
@@ -54,10 +53,10 @@ import {UserRole} from '../services/api.types'; // Значение для runti
 import type {User, ExternalDocument, AgskEnstruMatchItem} from '../services/api.types'; // Только типы
 
 // Локальные типы / хуки / утилиты страницы PSD-аналитика
-import type {AgskMatch, ReestrResult, SearchMode} from './psd-analyst/types';
+import type {AgskMatch, ReestrResult, SearchMode, DocumentStats} from './psd-analyst/types';
 import {SEARCH_TABS} from './psd-analyst/types';
 import {useDebounce} from './psd-analyst/hooks';
-import {Highlight, ClassifierText} from './psd-analyst/components';
+import {Highlight, ClassifierText, DocumentDashboard} from './psd-analyst/components';
 import {getItemStatus, getDvcColor, getStatusChip} from './psd-analyst/utils';
 
 const PsdAnalystPage: React.FC = () => {
@@ -81,7 +80,7 @@ const PsdAnalystPage: React.FC = () => {
     const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
     const [delegateDialogOpen, setDelegateDialogOpen] = useState(false);
     const [targetDoc, setTargetDoc] = useState<ExternalDocument | null>(null);
-    const [analysts, setAnalysts] = useState<{ id: number, full_name: string }[]>([]);
+    const [analysts, setAnalysts] = useState<{ id: number, full_name: string, role_label?: string }[]>([]);
     // State диалогов (selectedAnalystId / deadlineDays / rejectComment / delegate*)
     // инкапсулирован внутри компонентов ./psd-analyst/dialogs/*.tsx
 
@@ -109,6 +108,8 @@ const PsdAnalystPage: React.FC = () => {
     // Состояния для комментария аналитика
     const [analystComment, setAnalystComment] = useState('');
     const [savingComment, setSavingComment] = useState(false);
+
+    const [docStats, setDocStats] = useState<DocumentStats | null>(null);
 
     // Новая система сопоставлений
     const [pendingMatchCount, setPendingMatchCount] = useState(0);
@@ -157,6 +158,14 @@ const PsdAnalystPage: React.FC = () => {
             setAnalystComment(selectedDoc.analyst_comment || '');
         }
     }, [selectedDoc, onlyUnmatched, page, debouncedAgskSearch]);
+
+    useEffect(() => {
+        if (selectedDoc) {
+            psdApi.fetchDocumentStats(selectedDoc.id).then(setDocStats).catch(() => setDocStats(null));
+        } else {
+            setDocStats(null);
+        }
+    }, [selectedDoc?.id]);
 
     // Сброс поиска происходит только при РУЧНОЙ смене вкладки режима (см. onChange в Tabs ниже),
     // НЕ при программной установке searchMode из openEditDialog — иначе pre-fill не работает.
@@ -423,7 +432,7 @@ const PsdAnalystPage: React.FC = () => {
         // Определяем начальный поиск по типу позиции.
         let initialMode: SearchMode = 'all';
         let initialQuery = '';
-        if ((freshItem.match_type === 'auto' || freshItem.match_type === 'auto_ktp')
+        if (freshItem.match_type === 'auto_ktp'
             && freshItem.code_sn && !(freshItem.current_manual_matches?.length)) {
             // Авто-совпадение по АГСК: ищем по АГСК-коду чтобы сразу показать список КТП поставщиков
             initialMode = 'agsk';
@@ -469,6 +478,7 @@ const PsdAnalystPage: React.FC = () => {
             await psdApi.setNotInKtpRegistry(itemId, value);
             if (selectedDoc) {
                 loadMatches(selectedDoc.id);
+                psdApi.fetchDocumentStats(selectedDoc.id).then(setDocStats).catch(() => {});
             }
         } catch {
             // При ошибке возвращаем старое значение
@@ -559,6 +569,22 @@ const PsdAnalystPage: React.FC = () => {
         }
     };
 
+    const revokeMatch = async (matchId: number) => {
+        if (!window.confirm('Убрать эту запись из утверждённой библиотеки?')) return;
+        setApprovingId(matchId);
+        try {
+            await psdApi.revokeLibraryMatch(matchId);
+            setMatchesLibrary(prev => prev.map(m =>
+                m.id === matchId ? {...m, is_active: false, is_approved: false, status: 'rejected'} : m
+            ));
+            if (selectedDoc) loadMatches(selectedDoc.id);
+        } catch {
+            alert('Ошибка при отзыве утверждения');
+        } finally {
+            setApprovingId(null);
+        }
+    };
+
     const saveMatch = async (item: ReestrResult) => {
         if (!editingMatch) return;
         const itemId = editingMatch.item_id || editingMatch.id;
@@ -575,8 +601,17 @@ const PsdAnalystPage: React.FC = () => {
             // Обновляем editingMatch актуальными данными (включая current_manual_matches)
             const fresh = await psdApi.fetchDocumentItem(editingMatch.document_id!, itemId);
             setEditingMatch({...editingMatch, ...fresh});
-            // Обновляем таблицу
-            if (selectedDoc) loadMatches(selectedDoc.id);
+            // Мгновенно обновляем строку в таблице — не ждём полного loadMatches
+            setMatches(prev => prev.map(m =>
+                (m.id === itemId || m.item_id === itemId)
+                    ? {...m, ...(fresh as AgskMatch)}
+                    : m
+            ));
+            // Фоновое обновление всей таблицы и статистики
+            if (selectedDoc) {
+                loadMatches(selectedDoc.id);
+                psdApi.fetchDocumentStats(selectedDoc.id).then(setDocStats).catch(() => {});
+            }
             // Убираем выбранного поставщика из результатов поиска
             setReestrResults(prev => prev.filter((r: any) => !(r.enstru_code === item.enstru_code && r.ktp_id === item.ktp_id)));
         } catch (err: any) {
@@ -599,7 +634,10 @@ const PsdAnalystPage: React.FC = () => {
                 current_manual_matches: (prev.current_manual_matches || []).filter(m => m.id !== matchId)
             } : prev);
             // Обновляем главную таблицу
-            if (selectedDoc) loadMatches(selectedDoc.id);
+            if (selectedDoc) {
+                loadMatches(selectedDoc.id);
+                psdApi.fetchDocumentStats(selectedDoc.id).then(setDocStats).catch(() => {});
+            }
             // Восстанавливаем удалённый результат в поиске
             if (debouncedReestrSearch.length >= 2) {
                 handleSearchReestr();
@@ -659,14 +697,12 @@ const PsdAnalystPage: React.FC = () => {
 
     const currentSearchTab = SEARCH_TABS.find(t => t.mode === searchMode)!;
 
-    // Диалог в режиме «только просмотр»: для auto/auto_ktp АГСК прямо сопоставлен
-    // с реестром КТП — аналитик не выбирает поставщика, а только смотрит результат.
-    const isReadOnlyDialog =
-        editingMatch?.match_type === 'auto' || editingMatch?.match_type === 'auto_ktp';
+    // Авто-позиции теперь редактируемые — аналитик может дополнить поставщиков.
+    // Флаг используется только для отображения (chip "Авто", текст футера).
+    const isAutoMatch = editingMatch?.match_type === 'auto_ktp';
 
     return (
         <Box sx={{bgcolor: '#f5f7f9', minHeight: '100vh'}}>
-            <Header/>
             <Box sx={{p: 2}}>
                 <Box sx={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2}}>
                     <Box sx={{display: 'flex', alignItems: 'center', gap: 2}}>
@@ -1192,10 +1228,12 @@ const PsdAnalystPage: React.FC = () => {
                                                                     Открыть
                                                                 </Button>
 
-                                                                <IconButton size="small" color="error"
-                                                                            onClick={() => handleDeleteDocument(doc.id)}>
-                                                                    <DeleteIcon fontSize="small"/>
-                                                                </IconButton>
+                                                                {doc.is_test && (
+                                                                    <IconButton size="small" color="error"
+                                                                                onClick={() => handleDeleteDocument(doc.id)}>
+                                                                        <DeleteIcon fontSize="small"/>
+                                                                    </IconButton>
+                                                                )}
                                                             </Stack>
                                                         </TableCell>
                                                     </TableRow>
@@ -1264,7 +1302,7 @@ const PsdAnalystPage: React.FC = () => {
 
                             <Divider orientation="vertical" flexItem/>
 
-                            {totalCount === 0 ? (
+                            {totalCount === 0 && !debouncedAgskSearch && !onlyUnmatched ? (
                                 <Button size="small" variant="contained" color="warning" onClick={handleParse}
                                         disabled={parsing}>
                                     {parsing ? 'Загрузка...' : 'Распарсить'}
@@ -1298,8 +1336,7 @@ const PsdAnalystPage: React.FC = () => {
                                         // "Обработана" = есть активный выбор поставщика ИЛИ авто (АГСК в КТП)
                                         // ИЛИ не в реестре КТП ИЛИ не ТОВАР
                                         const isDone = (m: AgskMatch) =>
-                                            (m.current_manual_matches?.some(mm => mm.status === 'active' || (mm.status as string) === 'approved')) ||
-                                            m.match_type === 'auto' ||
+                                            ((m.current_manual_matches ?? []).some(mm => mm.status === 'active' || (mm.status as string) === 'approved')) ||
                                             m.match_type === 'auto_ktp' ||
                                             m.match_type === 'manual' ||
                                             m.not_in_ktp_registry ||
@@ -1394,6 +1431,8 @@ const PsdAnalystPage: React.FC = () => {
                                 </>
                             )}
                         </Paper>
+
+                        {totalCount > 0 && <DocumentDashboard stats={docStats}/>}
 
                         <TableContainer component={Paper} sx={{
                             borderRadius: 2,
@@ -1561,11 +1600,10 @@ const PsdAnalystPage: React.FC = () => {
                                             <TableCell align="right">
                                                 {(!m.item_type || m.item_type === 'GOODS') ? (
                                                     (() => {
-                                                        // Для auto/auto_ktp кнопка — это ПРОСМОТР,
-                                                        // выбор поставщика недоступен
-                                                        const isAuto = m.match_type === 'auto' || m.match_type === 'auto_ktp';
+                                                        // Для auto_ktp кнопка открывает просмотр с возможностью доп. выбора
+                                                        const isAuto = m.match_type === 'auto_ktp';
                                                         return (
-                                                            <Tooltip title={isAuto ? 'Просмотр (авто-сопоставление)' : 'Выбрать поставщика'}>
+                                                            <Tooltip title={isAuto ? 'Авто-сопоставление (можно дополнить поставщика)' : 'Выбрать поставщика'}>
                                                                 <IconButton size="small" onClick={() => openEditDialog(m)}
                                                                             sx={{bgcolor: isAuto ? '#e8f5e9' : '#f0f4f8'}}>
                                                                     {isAuto
@@ -1854,8 +1892,8 @@ const PsdAnalystPage: React.FC = () => {
                                                                 </Typography>
                                                             </Box>
 
-                                                            {/* Кнопки действий (только для менеджера) */}
-                                                            {isAnalystManager && (
+                                                            {/* Кнопки действий (менеджер или директор ДРВЦ) */}
+                                                            {(isAnalystManager || isRealDirector) && (
                                                                 <Box sx={{width: 180, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center'}}>
                                                                     {m.status === 'pending' ? (
                                                                         <Stack direction="row" spacing={0.5}>
@@ -1877,6 +1915,15 @@ const PsdAnalystPage: React.FC = () => {
                                                                                 Отклонить
                                                                             </Button>
                                                                         </Stack>
+                                                                    ) : m.status === 'approved' && isRealDirector ? (
+                                                                        <Button
+                                                                            size="small" variant="outlined" color="warning"
+                                                                            disabled={approvingId === m.id}
+                                                                            onClick={() => revokeMatch(m.id)}
+                                                                            sx={{textTransform: 'none', fontSize: '0.7rem', py: 0.25, minWidth: 140}}
+                                                                        >
+                                                                            Убрать из библиотеки
+                                                                        </Button>
                                                                     ) : (
                                                                         <Typography variant="caption" color="text.disabled">—</Typography>
                                                                     )}
@@ -2208,18 +2255,18 @@ const PsdAnalystPage: React.FC = () => {
                         maxWidth="xl" fullWidth
                         PaperProps={{sx: {height: '85vh', borderRadius: 2, overflow: 'hidden'}}}>
 
-                    {/* Read-only режим: auto/auto_ktp — АГСК напрямую сопоставлен с реестром КТП,
-                        ручной выбор поставщика не нужен, аналитик только смотрит результат. */}
+                    {/* auto_ktp — АГСК напрямую сопоставлен с реестром КТП.
+                        Аналитик может дополнить выбором поставщика. */}
                     <DialogTitle sx={{
                         borderBottom: '1px solid #eee', py: 1.5, px: 2,
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        bgcolor: (editingMatch?.match_type === 'auto' || editingMatch?.match_type === 'auto_ktp') ? '#e8f5e9' : 'inherit',
+                        bgcolor: editingMatch?.match_type === 'auto_ktp' ? '#e8f5e9' : 'inherit',
                     }}>
                         <Box sx={{minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 1}}>
-                            {(editingMatch?.match_type === 'auto' || editingMatch?.match_type === 'auto_ktp') && (
+                            {isAutoMatch && (
                                 <Chip
-                                    icon={<VisibilityIcon sx={{fontSize: 14}}/>}
-                                    label="Просмотр (авто)"
+                                    icon={<AutoIcon sx={{fontSize: 14}}/>}
+                                    label="Авто (можно дополнить)"
                                     size="small"
                                     color="success"
                                     sx={{fontSize: '0.7rem', height: 22, fontWeight: 'bold'}}
@@ -2249,8 +2296,8 @@ const PsdAnalystPage: React.FC = () => {
                                         </Typography>
                                     </Box>
 
-                                    {/* Отметка аналитика - Нет в реестре КТП (скрыта в режиме просмотра) */}
-                                    {!isReadOnlyDialog && (
+                                    {/* Отметка аналитика - Нет в реестре КТП (скрыта для авто-позиций) */}
+                                    {!isAutoMatch && (
                                         <Box sx={{p: 1.5, borderBottom: '1px solid #e0e0e0', bgcolor: '#fff3e0'}}>
                                             <FormControlLabel
                                                 control={
@@ -2281,23 +2328,19 @@ const PsdAnalystPage: React.FC = () => {
                                     )}
 
                                     <Box sx={{flexGrow: 1, overflowY: 'auto', p: 1.5}}>
-                                        {/* Подсказка из библиотеки / авто — нет выбора поставщика */}
-                                        {editingMatch?.enstru_code && !(editingMatch?.current_manual_matches?.length) && (
+                                        {/* Авто-сопоставление — показываем всегда, даже если аналитик добавил выборы */}
+                                        {editingMatch?.enstru_code && (isAutoMatch || !(editingMatch?.current_manual_matches?.length)) && (
                                             <Paper elevation={0} sx={{
                                                 p: 1.5, mb: 1.5,
-                                                border: editingMatch.match_type === 'auto' || editingMatch.match_type === 'auto_ktp'
-                                                    ? '1px solid #90caf9' : '1px solid #90caf9',
+                                                border: '1px solid #90caf9',
                                                 borderRadius: 2,
-                                                bgcolor: editingMatch.match_type === 'auto' || editingMatch.match_type === 'auto_ktp'
-                                                    ? '#e8eaf6' : '#e3f2fd',
+                                                bgcolor: isAutoMatch ? '#e8eaf6' : '#e3f2fd',
                                             }}>
                                                 <Box sx={{display: 'flex', alignItems: 'center', gap: 1, mb: 0.5}}>
                                                     <Chip
-                                                        label={editingMatch.match_type === 'auto' || editingMatch.match_type === 'auto_ktp'
-                                                            ? '🤖 Авто' : '💡 Подсказка'}
+                                                        label={isAutoMatch ? '🤖 Авто' : '💡 Подсказка'}
                                                         size="small"
-                                                        color={editingMatch.match_type === 'auto' || editingMatch.match_type === 'auto_ktp'
-                                                            ? 'primary' : 'info'}
+                                                        color={isAutoMatch ? 'primary' : 'info'}
                                                         sx={{height: 18, fontSize: '0.6rem'}}
                                                     />
                                                     <Typography variant="caption" fontWeight="bold" color="primary">
@@ -2305,7 +2348,9 @@ const PsdAnalystPage: React.FC = () => {
                                                     </Typography>
                                                 </Box>
                                                 <Typography sx={{fontSize: '0.65rem', color: 'text.secondary'}}>
-                                                    Поставщик не выбран. Найдите в реестре КТП справа →
+                                                    {isAutoMatch
+                                                        ? 'Авто-сопоставление по АГСК. Можно дополнить поставщиком ниже →'
+                                                        : 'Поставщик не выбран. Найдите в реестре КТП справа →'}
                                                 </Typography>
                                             </Paper>
                                         )}
@@ -2354,15 +2399,13 @@ const PsdAnalystPage: React.FC = () => {
                                                                 )}
                                                             </Box>
                                                         )}
-                                                        {!isReadOnlyDialog && (
-                                                            <IconButton
-                                                                size="small" color="error"
-                                                                sx={{position: 'absolute', top: 2, right: 2}}
-                                                                onClick={() => deleteMatch(mm.id)}
-                                                            >
-                                                                <DeleteIcon sx={{fontSize: 13}}/>
-                                                            </IconButton>
-                                                        )}
+                                                        <IconButton
+                                                            size="small" color="error"
+                                                            sx={{position: 'absolute', top: 2, right: 2}}
+                                                            onClick={() => deleteMatch(mm.id)}
+                                                        >
+                                                            <DeleteIcon sx={{fontSize: 13}}/>
+                                                        </IconButton>
                                                     </Paper>
                                                     );
                                                 })}
@@ -2479,7 +2522,7 @@ const PsdAnalystPage: React.FC = () => {
                                                 }}>
                                                     🕑 Ранее выбиралось для этого АГСК
                                                 </Typography>
-                                        
+
                                                 {editingMatch!.previous_agsk_selections!.map((prev, idx) => (
                                                     <Card key={`prev-${idx}`} elevation={0} sx={{
                                                         border: prev.ktp_is_active ? '1px solid #9575cd' : '1px solid #ffb74d',
@@ -2512,13 +2555,13 @@ const PsdAnalystPage: React.FC = () => {
                                                                     )}
                                                                 </Box>
                                                             </Box>
-                                        
+
                                                             {prev.supplier_product && (
                                                                 <Typography sx={{fontSize: '0.78rem', fontWeight: 'bold', color: '#1e293b', mb: 0.75, lineHeight: 1.3, wordBreak: 'break-word'}}>
                                                                     {prev.supplier_product}
                                                                 </Typography>
                                                             )}
-                                        
+
                                                             <Box sx={{mb: 1}}>
                                                                 <Box sx={{display: 'flex', alignItems: 'flex-start', gap: 1}}>
                                                                     <BusinessIcon sx={{fontSize: 14, color: '#64748b', mt: 0.2, flexShrink: 0}}/>
@@ -2527,7 +2570,7 @@ const PsdAnalystPage: React.FC = () => {
                                                                     </Typography>
                                                                 </Box>
                                                             </Box>
-                                        
+
                                                             {prev.enstru_code && (
                                                                 <Box sx={{mt: 1, pt: 1, borderTop: '1px solid #e1bee7'}}>
                                                                     <Typography sx={{fontSize: '0.65rem', color: '#546e7a', lineHeight: 1.5}}>
@@ -2536,9 +2579,8 @@ const PsdAnalystPage: React.FC = () => {
                                                                     </Typography>
                                                                 </Box>
                                                             )}
-                                        
-                                                            {/* В режиме просмотра (auto/auto_ktp) кнопка выбора скрыта */}
-                                                            {isReadOnlyDialog ? null : prev.ktp_is_active && prev.ktp_id ? (
+
+                                                            {prev.ktp_is_active && prev.ktp_id ? (
                                                                 <Button size="small" variant="contained" disableElevation fullWidth
                                                                         onClick={() => saveMatch({
                                                                             ktp_id: prev.ktp_id!,
@@ -2561,7 +2603,7 @@ const PsdAnalystPage: React.FC = () => {
                                                         </CardContent>
                                                     </Card>
                                                 ))}
-                                        
+
                                                 <Divider sx={{my: 0.5, borderStyle: 'dashed', borderColor: '#ce93d8'}}/>
                                             </>
                                         )}
@@ -2677,10 +2719,8 @@ const PsdAnalystPage: React.FC = () => {
                                                         </Box>
                                                     )}
 
-                                                    {/* В режиме просмотра (auto/auto_ktp) — без кнопки выбора */}
-                                                    {!isReadOnlyDialog && (
-                                                        <Button size="small" variant="contained" disableElevation fullWidth
-                                                                onClick={() => saveMatch(r)}
+                                                    <Button size="small" variant="contained" disableElevation fullWidth
+                                                            onClick={() => saveMatch(r)}
                                                                 sx={{
                                                                     textTransform: 'none',
                                                                     fontSize: '0.75rem',
@@ -2691,7 +2731,6 @@ const PsdAnalystPage: React.FC = () => {
                                                                 }}>
                                                             Выбрать поставщика
                                                         </Button>
-                                                    )}
                                                 </CardContent>
                                             </Card>
                                         ))}
@@ -2703,11 +2742,11 @@ const PsdAnalystPage: React.FC = () => {
 
                     <DialogActions sx={{px: 2, py: 1, borderTop: '1px solid #e0e0e0'}}>
                         <Box sx={{flexGrow: 1, display: 'flex', alignItems: 'center', gap: 1}}>
-                            {isReadOnlyDialog ? (
+                            {isAutoMatch ? (
                                 <>
-                                    <VisibilityIcon sx={{fontSize: 16, color: 'success.main'}}/>
-                                    <Typography sx={{fontSize: '0.65rem', color: 'success.main', fontWeight: 600}}>
-                                        Авто-сопоставление по АГСК — выбор поставщика не требуется
+                                    <AutoIcon sx={{fontSize: 16, color: '#2e7d32'}}/>
+                                    <Typography sx={{fontSize: '0.65rem', color: '#2e7d32', fontWeight: 600}}>
+                                        Авто-сопоставление по АГСК. Можно дополнить поставщиком — в Excel берётся минимальный ВЦ%
                                     </Typography>
                                 </>
                             ) : (

@@ -18,7 +18,6 @@ import {
   Functions as TotalIcon, Description as DescriptionIcon, CompareArrows as CompareIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../i18n/index.tsx';
-import Header from '../components/Header';
 import ExecutionModal from '../components/ExecutionModal';
 import ImportModal from '../components/ImportModal';
 import {
@@ -78,21 +77,21 @@ const formatPercent = (value: number) => {
     return value.toFixed(1) + '%';
 };
 
-const DetailedStatsCard = ({ 
-    title, 
-    data, 
+const DetailedStatsCard = ({
+    title,
+    data,
     color = 'primary.main',
-    showExecuted = false 
-}: { 
-    title: string; 
-    data: Array<{ 
-        label: string; 
-        amount: number; 
+    showExecuted = false
+}: {
+    title: string;
+    data: Array<{
+        label: string;
+        amount: number;
         percentage?: number;
         executedAmount?: number;
         executedPercentage?: number;
         icon?: React.ReactNode;
-    }>; 
+    }>;
     color?: string;
     showExecuted?: boolean;
 }) => (
@@ -110,14 +109,14 @@ const DetailedStatsCard = ({
                     {formatCurrency(item.amount)}
                 </Typography>
             </Box>
-            
+
             {item.percentage !== undefined && (
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
                     <Box sx={{ flexGrow: 1, mr: 1 }}>
-                        <LinearProgress 
-                            variant="determinate" 
-                            value={Math.min(item.percentage, 100)} 
-                            sx={{ height: 6, borderRadius: 3, bgcolor: 'action.hover', '& .MuiLinearProgress-bar': { bgcolor: color } }} 
+                        <LinearProgress
+                            variant="determinate"
+                            value={Math.min(item.percentage, 100)}
+                            sx={{ height: 6, borderRadius: 3, bgcolor: 'action.hover', '& .MuiLinearProgress-bar': { bgcolor: color } }}
                         />
                     </Box>
                     <Typography variant="caption" fontWeight="bold" sx={{ color }}>
@@ -177,7 +176,7 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
         result.goods.executedTotal += executedTotal;
         result.goods.executedVc += executedVc;
       } else if (item.need_type === 'Работа') {
-        result.works.total += total; 
+        result.works.total += total;
         result.works.vc += vc;
         result.works.executedTotal += executedTotal;
         result.works.executedVc += executedVc;
@@ -201,21 +200,21 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
       { label: t('total_label') || 'В общем', icon: <TotalIcon fontSize="small" />, ...getValue({ total: overallTotal, vc: overallVc, executedTotal: overallExecutedTotal, executedVc: overallExecutedVc }) },
     ];
 
-    const vcData = buildStatData(s => ({ 
-        amount: s.vc, 
+    const vcData = buildStatData(s => ({
+        amount: s.vc,
         percentage: s.total > 0 ? (s.vc / s.total) * 100 : 0,
         executedAmount: s.executedVc,
         executedPercentage: s.total > 0 ? (s.executedVc / s.total) * 100 : 0
     }));
-    
-    const importData = buildStatData(s => ({ 
-        amount: s.total - s.vc, 
+
+    const importData = buildStatData(s => ({
+        amount: s.total - s.vc,
         percentage: s.total > 0 ? ((s.total - s.vc) / s.total) * 100 : 0,
         executedAmount: s.executedTotal - s.executedVc,
         executedPercentage: s.total > 0 ? ((s.executedTotal - s.executedVc) / s.total) * 100 : 0
     }));
-    
-    const totalData = buildStatData(s => ({ 
+
+    const totalData = buildStatData(s => ({
         amount: s.total,
         executedAmount: s.executedTotal
     }));
@@ -224,7 +223,7 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
   }, [version, t]);
 
   if (!stats) return null;
-  
+
   const isApproved = version?.status === PlanStatus.APPROVED;
 
   return (
@@ -240,7 +239,7 @@ const StatsSection = ({ version }: { version: ProcurementPlanVersion | null }) =
 
 const StatusChip = ({ status, isExecuted }: { status: PlanStatus, isExecuted: boolean }) => {
   const { t } = useTranslation();
-  
+
   if (isExecuted) {
       return <Chip label={t('status_EXECUTED')} color="success" variant="outlined" sx={{ fontWeight: 'bold' }} icon={<CheckCircleIcon />} />;
   }
@@ -258,7 +257,7 @@ const StatusChip = ({ status, isExecuted }: { status: PlanStatus, isExecuted: bo
 
 const formatItemNumber = (item: PlanItemVersion) => {
     let number = `${item.item_number}`;
-    
+
     if (item.revision_number > 0) {
         number += `-${item.revision_number}`;
     }
@@ -268,23 +267,23 @@ const formatItemNumber = (item: PlanItemVersion) => {
         case 'Работа': number += ' Р'; break;
         case 'Услуга': number += ' У'; break;
     }
-    
+
     return number;
 };
 
 type TFunctionType = ReturnType<typeof useTranslation>['t'];
 
-const PlanItemRow = React.memo(({ 
-    item, 
-    activeVersionId, 
-    isEditable, 
-    isApproved, 
-    t, 
+const PlanItemRow = React.memo(({
+    item,
+    activeVersionId,
+    isEditable,
+    isApproved,
+    t,
     lang,
-    onEdit, 
-    onDelete, 
-    onRevert, 
-    onExecution 
+    onEdit,
+    onDelete,
+    onRevert,
+    onExecution
 }: {
     item: PlanItemVersion;
     activeVersionId: number;
@@ -298,17 +297,17 @@ const PlanItemRow = React.memo(({
     onExecution: (item: PlanItemVersion) => void;
 }) => {
     const canRevert = isEditable && !item.is_deleted && item.source_version_id === activeVersionId && item.root_item_id !== item.id;
-    
+
     const executedQty = Number(item.executed_quantity || 0);
     const planQty = Number(item.quantity || 0);
     const executedAmt = Number(item.executed_amount || 0);
     const planAmt = Number(item.total_amount || 0);
-    
+
     const progress = planQty > 0 ? Math.min((executedQty / planQty) * 100, 100) : 0;
     const isFullyExecuted = executedQty >= planQty && planQty > 0;
 
     return (
-        <TableRow 
+        <TableRow
             hover
             sx={{
             backgroundColor: item.is_deleted ? '#f5f5f5' : 'inherit',
@@ -341,11 +340,11 @@ const PlanItemRow = React.memo(({
             <TableCell align="right">
                 {item.vc_amount ? formatCurrency(Number(item.vc_amount)) : '-'}
             </TableCell>
-            
+
             {isApproved && (
                 <TableCell align="center">
                 {!item.is_deleted ? (
-                    <Tooltip 
+                    <Tooltip
                         title={
                             <Box>
                                 <Typography variant="caption" display="block">{t('quantity')}: {executedQty} / {planQty}</Typography>
@@ -418,7 +417,7 @@ export default function PlanForm() {
   const [error, setError] = useState('');
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [nextStatus, setNextStatus] = useState<PlanStatus | null>(null);
-  
+
   const [isExecutionModalOpen, setExecutionModalOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [selectedItemName, setSelectedItemName] = useState('');
@@ -503,10 +502,10 @@ export default function PlanForm() {
       }
     }
   };
-  
+
   const handleKenmlImport = async (_: React.ChangeEvent<HTMLInputElement>) => { // Changed _event to _
     if (!_.target.files || _.target.files.length === 0) return;
-    
+
     const file = _.target.files[0];
     setLoading(true);
     try {
@@ -584,17 +583,17 @@ export default function PlanForm() {
 
   const handleCompareVersions = async () => {
     if (!plan || !activeVersion || plan.versions.length < 2) return;
-    
+
     const sortedVersions = [...plan.versions].sort((a, b) => a.version_number - b.version_number);
     const currentIndex = sortedVersions.findIndex(v => v.id === activeVersion.id);
-    
+
     if (currentIndex <= 0) {
         alert("Нет предыдущей версии для сравнения");
         return;
     }
-    
+
     const prevVersion = sortedVersions[currentIndex - 1];
-    
+
     setCompareLoading(true);
     setCompareModalOpen(true);
     try {
@@ -612,22 +611,22 @@ export default function PlanForm() {
 
   const filteredItems = useMemo(() => {
     if (!activeVersion?.items) return [];
-    
+
     return activeVersion.items.filter(item => {
       const matchesKtp = !showKtpOnly || item.is_ktp;
       const matchesType = filterTypes.length === 0 || filterTypes.includes(item.need_type);
-      
+
       const searchEnstruLower = searchEnstru.toLowerCase();
-      const matchesEnstru = !searchEnstru || 
+      const matchesEnstru = !searchEnstru ||
         (item.trucode?.toLowerCase().includes(searchEnstruLower));
 
       const searchNameLower = searchName.toLowerCase();
-      const matchesName = !searchName || 
+      const matchesName = !searchName ||
         (item.enstru?.name_rus?.toLowerCase().includes(searchNameLower)) ||
         (item.enstru?.name_kaz?.toLowerCase().includes(searchNameLower));
 
       const searchAgskLower = searchAgsk.toLowerCase();
-      const matchesAgsk = !searchAgsk || 
+      const matchesAgsk = !searchAgsk ||
         (item.agsk?.code?.toLowerCase().includes(searchAgskLower));
 
       const searchSpecsLower = searchSpecs.toLowerCase();
@@ -640,11 +639,11 @@ export default function PlanForm() {
 
   const sortedAndPaginatedItems = useMemo(() => {
     const typeOrder: Record<string, number> = { 'Товар': 1, 'Работа': 2, 'Услуга': 3 };
-    
+
     const sorted = [...filteredItems].sort((a, b) => {
         const typeDiff = (typeOrder[a.need_type] || 4) - (typeOrder[b.need_type] || 4);
         if (typeDiff !== 0) return typeDiff;
-        
+
         if (a.is_deleted && !b.is_deleted) return 1;
         if (!a.is_deleted && b.is_deleted) return -1;
         return a.item_number - b.item_number;
@@ -666,13 +665,12 @@ export default function PlanForm() {
       }
   };
 
-  if (loading) return <><Header /><Box sx={{ p: 4, display: 'flex', justifyContent: 'center' }}><CircularProgress /></Box></>;
-  if (error) return <><Header /><Box sx={{ p: 4 }}><Alert severity="error">{error}</Alert></Box></>;
-  if (!plan || !activeVersion) return <><Header /><Box sx={{ p: 4 }}><Alert severity="info">{t('no_plan_data')}</Alert></Box></>;
+  if (loading) return <Box sx={{ p: 4, display: 'flex', justifyContent: 'center' }}><CircularProgress /></Box>;
+  if (error) return <Box sx={{ p: 4 }}><Alert severity="error">{error}</Alert></Box>;
+  if (!plan || !activeVersion) return <Box sx={{ p: 4 }}><Alert severity="info">{t('no_plan_data')}</Alert></Box>;
 
   return (
     <>
-      <Header />
       <Container maxWidth={false} sx={{ py: 4, px: { xs: 2, md: 4 } }}>
         <Paper sx={{ p: 3, mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
           <Box>

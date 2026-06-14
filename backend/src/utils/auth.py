@@ -48,7 +48,7 @@ def authenticate_user(db: Session, iin: str, password: str) -> Optional[User]:
 
     if not verify_password(password, user.hashed_password):
         return None
-        
+
     return user
 
 
@@ -68,21 +68,22 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
+
     user = db.query(User).filter(User.iin == iin).first()
     if user is None:
         raise credentials_exception
     return user
 
 
-def get_current_director_or_admin(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
+def get_current_director_or_admin(current_user: User = Depends(get_current_user),
+                                  db: Session = Depends(get_db)) -> User:
     """
     Проверяет, является ли пользователь директором или админом.
     Также учитывает делегирование полномочий директора.
     """
     if current_user.role in [UserRole.ADMIN, UserRole.DIRECTOR_DRVC]:
         return current_user
-    
+
     # Проверка делегирования: есть ли директор, который делегировал права текущему пользователю
     now = datetime.now(timezone.utc)
     delegator = db.query(User).filter(
@@ -91,7 +92,7 @@ def get_current_director_or_admin(current_user: User = Depends(get_current_user)
         User.delegation_start <= now,
         User.delegation_end >= now
     ).first()
-    
+
     if delegator:
         return current_user
 
@@ -131,8 +132,19 @@ def get_current_analyst_manager(current_user: User = Depends(get_current_user)) 
 def get_current_analyst_drvc(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role == UserRole.ANALYST_DRVC:
         return current_user
-    
+
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Требуются права аналитика ДРВЦ"
+    )
+
+
+def get_current_library_approver(current_user: User = Depends(get_current_user)) -> User:
+    """Утверждение/отклонение библиотечных записей: менеджер аналитиков, директор ДРВЦ или админ."""
+    if current_user.role in [UserRole.ADMIN, UserRole.ANALYST_MANAGER, UserRole.DIRECTOR_DRVC]:
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Требуются права менеджера аналитиков или директора ДРВЦ"
     )

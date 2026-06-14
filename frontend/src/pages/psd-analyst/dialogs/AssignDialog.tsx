@@ -7,7 +7,7 @@ import {
 interface Props {
     open: boolean;
     onClose: () => void;
-    analysts: { id: number; full_name: string }[];
+    analysts: { id: number; full_name: string; role_label?: string }[];
     onSubmit: (analystId: number, days: number) => Promise<void> | void;
     loading: boolean;
 }
@@ -42,7 +42,9 @@ export default function AssignDialog({open, onClose, analysts, onSubmit, loading
                             onChange={(e) => setAnalystId(e.target.value as number)}
                         >
                             {analysts.map(a => (
-                                <MenuItem key={a.id} value={a.id}>{a.full_name}</MenuItem>
+                                <MenuItem key={a.id} value={a.id}>
+                                    {a.full_name}{a.role_label ? ` — ${a.role_label}` : ''}
+                                </MenuItem>
                             ))}
                         </Select>
                     </FormControl>

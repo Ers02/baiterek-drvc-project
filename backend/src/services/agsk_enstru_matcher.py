@@ -22,12 +22,35 @@ class AgskEnstruMatcher:
             return None
         q = str(agsk_code).strip()
 
-        # Проверяем: есть ли точное совпадение АГСК в Реестре КТП
-        is_exact_ktp_match = self.db.query(Reestr_KTP.id).filter(
+        # ── ПРИОРИТЕТ 1: точное совпадение кода АГСК в jsonb agsk3_codes Реестра КТП ──
+        # Код АГСК из ПСД 1-в-1 присутствует в активной записи реестра → это
+        # АВТО-сопоставление (100% совпадение кода). Наличие ЕНСТРУ в справочнике
+        # НЕ требуется — код АГСК уже доказывает совпадение.
+        ktp_exact = self.db.query(Reestr_KTP).filter(
+            Reestr_KTP.is_active.isnot(False),
             Reestr_KTP.agsk3_codes.contains([q])
-        ).first() is not None
+        ).order_by(Reestr_KTP.id).first()
 
-        # 1. Утверждённая библиотека сопоставлений (проверено менеджером)
+        if ktp_exact:
+            enstru_code = ktp_exact.enstru_codes[0] if ktp_exact.enstru_codes else None
+            enstru_name = None
+            if enstru_code:
+                if ktp_exact.enstru_names:
+                    enstru_name = ktp_exact.enstru_names[0]
+                enstru_obj = self.db.query(Enstru).filter(Enstru.code == enstru_code).first()
+                if enstru_obj and enstru_obj.name_rus:
+                    enstru_name = enstru_obj.name_rus
+            dvc = ktp_exact.dvc_percent or "0"
+            return {
+                "enstru_code": enstru_code,
+                "enstru_name": enstru_name,
+                "match_type": "auto_ktp",
+                "score": 100,
+                "reason": f"Точное совпадение кода АГСК в реестре КТП (Завод: {ktp_exact.company_name}, ДВС: {dvc}%)",
+            }
+
+        # ── ПРИОРИТЕТ 2: утверждённая библиотека (АГСК → ЕНСТРУ, проверено менеджером) ──
+        # Прямого совпадения АГСК в КТП нет → это лишь подсказка для аналитика.
         best_approved = (
             self.db.query(AgskEnstruMatch)
             .filter(
@@ -41,38 +64,12 @@ class AgskEnstruMatcher:
 
         if best_approved:
             enstru_obj = self.db.query(Enstru).filter(Enstru.code == best_approved.enstru_code).first()
-            m_type = "manual_ktp" if is_exact_ktp_match else "manual"
             return {
                 "enstru_code": best_approved.enstru_code,
                 "enstru_name": enstru_obj.name_rus if enstru_obj else None,
-                "match_type": m_type,
-                "score": 100,
+                "match_type": "library",
+                "score": 90,
                 "reason": "Утверждённая библиотека сопоставлений АГСК → ЕНСТРУ",
             }
-
-        # 2. Прямой поиск в Реестре КТП (точный код 1 в 1, только активные поставщики)
-        ktp_exact = self.db.query(Reestr_KTP).filter(
-            Reestr_KTP.is_active.isnot(False),
-            Reestr_KTP.agsk3_codes.contains([q])
-        ).first()
-
-        if ktp_exact and ktp_exact.enstru_codes:
-            for code in ktp_exact.enstru_codes:
-                if self._check_enstru_exists(code):
-                    name = "Из КТП"
-                    try:
-                        idx = ktp_exact.enstru_codes.index(code)
-                        if ktp_exact.enstru_names and len(ktp_exact.enstru_names) > idx:
-                            name = ktp_exact.enstru_names[idx]
-                    except Exception:
-                        pass
-                    dvc = ktp_exact.dvc_percent or "0"
-                    return {
-                        "enstru_code": code,
-                        "enstru_name": name,
-                        "match_type": "auto_ktp",
-                        "score": 95,
-                        "reason": f"Реестр КТП (Завод: {ktp_exact.company_name}, ДВС: {dvc}%)",
-                    }
 
         return None

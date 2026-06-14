@@ -4,14 +4,14 @@
  */
 import api from '../../services/api';
 import type {ExternalDocument, User, AgskEnstruMatchItem} from '../../services/api.types';
-import type {AgskMatch, ReestrResult, SearchMode} from './types';
+import type {AgskMatch, ReestrResult, SearchMode, DocumentStats} from './types';
 
 // ── Документы ──────────────────────────────────────────────────────────────
 
 export const fetchCurrentUser = (): Promise<User> =>
     api.get('/auth/me').then(r => r.data);
 
-export const fetchAnalysts = (): Promise<{ id: number; full_name: string }[]> =>
+export const fetchAnalysts = (): Promise<{ id: number; full_name: string; role_label: string }[]> =>
     api.get('/psd-analyst/analysts').then(r => r.data);
 
 export const fetchLibraryUsers = (): Promise<{ id: number; full_name: string; role_label: string }[]> =>
@@ -30,6 +30,9 @@ export const fetchDocumentItems = (
 
 export const fetchDocumentItem = (docId: number, itemId: number): Promise<Partial<AgskMatch>> =>
     api.get(`/psd-analyst/document-items/${docId}/item/${itemId}`).then(r => r.data);
+
+export const fetchDocumentStats = (docId: number): Promise<DocumentStats> =>
+    api.get(`/psd-analyst/documents/${docId}/stats`).then(r => r.data);
 
 // ── Действия с документом ──────────────────────────────────────────────────
 
@@ -131,6 +134,9 @@ export const approveLibraryMatch = (matchId: number) =>
 
 export const rejectLibraryMatch = (matchId: number) =>
     api.post(`/psd-analyst/matches/${matchId}/reject`);
+
+export const revokeLibraryMatch = (matchId: number) =>
+    api.post(`/psd-analyst/matches/${matchId}/revoke`);
 
 export const deleteLibraryMatch = (matchId: number) =>
     api.delete(`/psd-analyst/matches/${matchId}`);

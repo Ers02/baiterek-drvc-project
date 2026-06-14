@@ -12,7 +12,7 @@ import {
     AccessTime as AccessTimeIcon,
     ContactPage as ContactIcon
 } from '@mui/icons-material';
-import Header from '../components/Header';
+import { jwtDecode } from 'jwt-decode';
 import { calculateWorkingDays } from '../utils/dateUtils';
 import {
     adminGetUsers,
@@ -160,7 +160,7 @@ const ExternalDocsTab = () => {
     const [loading, setLoading] = useState(true);
     const [uploadOpen, setUploadOpen] = useState(false);
     const [error, setError] = useState('');
-    
+
     const [file, setFile] = useState<File | null>(null);
     const [docType, setDocType] = useState('PSD');
     const [bankName, setBankName] = useState('');
@@ -259,7 +259,7 @@ const ExternalDocsTab = () => {
                         {docs.map((doc) => {
                             const days = calculateWorkingDays(doc.received_at, doc.completed_at || new Date());
                             const isOverdue = days > 10 && doc.status !== 'SENT';
-                            
+
                             return (
                                 <TableRow key={doc.id}>
                                     <TableCell>{doc.id}</TableCell>
@@ -277,23 +277,23 @@ const ExternalDocsTab = () => {
                                     </TableCell>
                                     <TableCell>{new Date(doc.received_at).toLocaleString()}</TableCell>
                                     <TableCell>
-                                        <Chip 
+                                        <Chip
                                             icon={<AccessTimeIcon />}
                                             label={`${days} раб. дн.`}
-                                            color={isOverdue ? 'error' : 'default'} 
+                                            color={isOverdue ? 'error' : 'default'}
                                             variant={isOverdue ? 'filled' : 'outlined'}
-                                            size="small" 
+                                            size="small"
                                             sx={{ fontWeight: 'bold' }}
                                         />
                                     </TableCell>
                                     <TableCell>
-                                        <Chip 
-                                            label={doc.status === 'SENT' ? 'Отправлен' : doc.status} 
+                                        <Chip
+                                            label={doc.status === 'SENT' ? 'Отправлен' : doc.status}
                                             color={
-                                                doc.status === 'SENT' ? 'success' : 
+                                                doc.status === 'SENT' ? 'success' :
                                                 doc.status === 'NEW' ? 'info' : 'default'
-                                            } 
-                                            size="small" 
+                                            }
+                                            size="small"
                                         />
                                     </TableCell>
                                     <TableCell align="right">
@@ -303,7 +303,7 @@ const ExternalDocsTab = () => {
                                                     <DownloadIcon />
                                                 </IconButton>
                                             </Tooltip>
-                                            
+
                                             {doc.status !== 'SENT' && (
                                                 <Tooltip title="Отправить ответ">
                                                     <IconButton size="small" color="primary" onClick={() => handleSendResponse(doc.id)}>
@@ -311,7 +311,7 @@ const ExternalDocsTab = () => {
                                                     </IconButton>
                                                 </Tooltip>
                                             )}
-                                            
+
                                             {doc.status === 'SENT' && (
                                                 <Tooltip title="Ответ отправлен">
                                                     <CheckCircleIcon color="success" fontSize="small" />
@@ -345,7 +345,7 @@ const ExternalDocsTab = () => {
                                 <TextField label="Примечание" value={notes} onChange={(e) => setNotes(e.target.value)} fullWidth multiline rows={2} size="small" />
                             </Stack>
                         </Grid>
-                        
+
                         <Grid size={{ xs: 12, md: 6 }}>
                             <Typography variant="subtitle2" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <ContactIcon color="primary" fontSize="small" /> Данные отправителя
@@ -358,7 +358,7 @@ const ExternalDocsTab = () => {
                                 <TextField label="Телефон" value={senderPhone} onChange={(e) => setSenderPhone(e.target.value)} fullWidth size="small" />
                             </Stack>
                         </Grid>
-                        
+
                         <Grid size={{ xs: 12 }}>
                             <Divider sx={{ my: 1 }} />
                             <Box sx={{ mt: 1 }}>
@@ -384,28 +384,39 @@ const ExternalDocsTab = () => {
 export default function AdminPage() {
   const [tab, setTab] = useState(0);
 
+  let isAdmin = false;
+  try {
+    const token = localStorage.getItem('token');
+    if (token) {
+      const decoded: { is_admin?: boolean } = jwtDecode(token);
+      isAdmin = decoded.is_admin === true;
+    }
+  } catch { /* ignore */ }
+
+  // Индексы табов зависят от видимости "Пользователи"
+  // isAdmin:    0=Входящие, 1=Пользователи, 2=Все планы
+  // !isAdmin:   0=Входящие, 1=Все планы
+  const plansTabIndex = isAdmin ? 2 : 1;
+
   return (
-    <>
-      <Header />
-      <Container maxWidth="xl" sx={{ py: 4 }}>
-        <Typography variant="h4" gutterBottom fontWeight="bold" sx={{ mb: 4 }}>
-          Панель Администратора
-        </Typography>
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Typography variant="h4" gutterBottom fontWeight="bold" sx={{ mb: 4 }}>
+        Проекты
+      </Typography>
 
-        <Paper sx={{ mb: 3 }}>
-          <Tabs value={tab} onChange={(_event, v) => setTab(v)} centered>
-            <Tab icon={<InboxIcon />} label="Входящие документы" />
-            <Tab icon={<PersonIcon />} label="Пользователи" />
-            <Tab icon={<DescriptionIcon />} label="Все планы" />
-          </Tabs>
-        </Paper>
+      <Paper sx={{ mb: 3 }}>
+        <Tabs value={tab} onChange={(_event, v) => setTab(v)} centered>
+          <Tab icon={<InboxIcon />} label="Входящие документы" />
+          {isAdmin && <Tab icon={<PersonIcon />} label="Пользователи" />}
+          <Tab icon={<DescriptionIcon />} label="Все планы" />
+        </Tabs>
+      </Paper>
 
-        <Box sx={{ mt: 2 }}>
-          {tab === 0 && <ExternalDocsTab />}
-          {tab === 1 && <UsersTab />}
-          {tab === 2 && <PlansTab />}
-        </Box>
-      </Container>
-    </>
+      <Box sx={{ mt: 2 }}>
+        {tab === 0 && <ExternalDocsTab />}
+        {isAdmin && tab === 1 && <UsersTab />}
+        {tab === plansTabIndex && <PlansTab />}
+      </Box>
+    </Container>
   );
 }

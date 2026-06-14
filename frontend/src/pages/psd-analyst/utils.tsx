@@ -15,22 +15,17 @@ export const getItemStatus = (m: AgskMatch): { label: string; color: 'success' |
     if (m.not_in_ktp_registry === true) {
         return {label: 'Нет в реестре КТП', color: 'warning'};
     }
-    const hasActive = m.current_manual_matches?.some(
+    const hasActive = (m.current_manual_matches ?? []).some(
         mm => mm.status === 'active' || (mm.status as string) === 'approved'
     );
-    const hasPending = m.current_manual_matches?.some(
+    const hasPending = (m.current_manual_matches ?? []).some(
         mm => mm.status === 'pending' && mm.is_active !== false
     );
-    if (hasActive) return {label: '✅ Выбран поставщик', color: 'success'};
+    // Ручной выбор поставщика (не авто)
+    if (m.match_type !== 'auto_ktp' && hasActive) return {label: '✅ Выбран поставщик', color: 'success'};
     if (hasPending) return {label: '⏳ Ожидает', color: 'warning'};
-    // match_type='manual' — поставщик выбран (фолбек если current_manual_matches ещё не загружены/пустые)
     if (m.match_type === 'manual') return {label: '✅ Выбран поставщик', color: 'success'};
-    // auto/auto_ktp — АГСК напрямую в реестре КТП, считается обработанным (не нужен выбор аналитика)
     if (m.match_type === 'auto_ktp') return {label: '✅ Авто (КТП)', color: 'success'};
-    if (m.match_type === 'auto') return {label: '✅ Авто', color: 'success'};
-    // 💡 Подсказка — ТОЛЬКО когда match_type='suggested' (для этого ЕНСТРУ есть
-    // поставщик в реестре КТП). Если match_type='none' но enstru_code есть —
-    // значит ЕНСТРУ из сметы «осиротевший», подсказка бесполезна.
     if (m.match_type === 'suggested' && m.enstru_code) return {label: '💡 Подсказка', color: 'info'};
     return {label: '⚠ Не указано', color: 'error'};
 };

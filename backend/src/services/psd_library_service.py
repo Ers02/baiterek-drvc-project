@@ -74,6 +74,23 @@ class PsdLibraryMixin:
         db.refresh(match)
         return match
 
+    def revoke_approved_match(self, db: Session, match_id: int) -> AgskEnstruMatch:
+        """Директор ДРВЦ отзывает утверждение библиотечной записи.
+        Переводит запись из approved → rejected (is_active=False, is_approved=False).
+        """
+        match = db.query(AgskEnstruMatch).filter(AgskEnstruMatch.id == match_id).first()
+        if not match:
+            raise ValueError("Сопоставление не найдено")
+        if not match.is_approved:
+            raise ValueError("Сопоставление не является утверждённым")
+        match.is_active = False
+        match.is_approved = False
+        match.approved_by = None
+        match.approved_at = None
+        db.commit()
+        db.refresh(match)
+        return match
+
     def create_match(self, db: Session, agsk_code: str, enstru_code: str, created_by: int) -> AgskEnstruMatch:
         """Создаёт связку АГСК→ЕНСТРУ.
         - Если активная (pending/approved) уже есть — raise ValueError.

@@ -2,14 +2,16 @@
 
 Используется как миксин в PsdAnalystService.
 """
+import re
 from collections import defaultdict
+from decimal import Decimal
 from typing import Dict, Optional
 
 from sqlalchemy import case, desc, func, or_
 from sqlalchemy.orm import Session
 
 from ..models.models import (
-    Agsk, AgskEnstruMatch, Enstru, PsdDocumentItem, PsdItemSupplierSelection,
+    Agsk, AgskEnstruMatch, Enstru, PsdDocumentItem, PsdItemSupplierSelection, Reestr_KTP,
 )
 
 
@@ -30,7 +32,7 @@ class PsdItemsMixin:
         if only_unmatched:
             # «Необработанная» позиция = GOODS с match_type в ('none', 'suggested'),
             # не отмечена «нет в реестре» и не имеет активного выбора поставщика.
-            # auto/auto_ktp = АГСК прямо в реестре КТП → уже обработаны, не показываем.
+            # auto_ktp = АГСК прямо в реестре КТП → уже обработаны, не показываем.
             active_item_subq = db.query(PsdItemSupplierSelection.item_id).filter(
                 PsdItemSupplierSelection.status == 'active',
                 PsdItemSupplierSelection.is_active == True,
@@ -42,12 +44,12 @@ class PsdItemsMixin:
                     PsdDocumentItem.not_in_ktp_registry == None,
                 ),
                 ~PsdDocumentItem.id.in_(active_item_subq),
-                # auto/auto_ktp — АГСК напрямую в КТП, считаются обработанными
-                ~PsdDocumentItem.match_type.in_(['auto', 'auto_ktp']),
+                # auto_ktp — АГСК напрямую в КТП, считаются обработанными
+                PsdDocumentItem.match_type != 'auto_ktp',
             )
         # Сортировка:
         # Вверх: 'none' / 'suggested' — требуют действия аналитика
-        # Вниз:  'manual' / 'auto' / 'auto_ktp' / 'manual_ktp' — обработаны
+        # Вниз:  'manual' / 'auto_ktp' / 'manual_ktp' — обработаны
         # Самый низ: OTHER/BALANCE
         query = query.order_by(
             case((PsdDocumentItem.item_type == 'OTHER', 2), else_=0),
@@ -174,8 +176,8 @@ class PsdItemsMixin:
         library_match_id: Optional[int] = None
 
         # Создаём/реактивируем библиотечную запись только для не-авто позиций
-        # (для auto/auto_ktp АГСК уже напрямую есть в реестре КТП — библиотека не нужна)
-        is_auto = item.match_type in ('auto', 'auto_ktp')
+        # (для auto_ktp АГСК уже напрямую есть в реестре КТП — библиотека не нужна)
+        is_auto = item.match_type == 'auto_ktp'
         if not is_auto and agsk_code:
             match = db.query(AgskEnstruMatch).filter(
                 AgskEnstruMatch.agsk_code == agsk_code,
@@ -221,17 +223,150 @@ class PsdItemsMixin:
         )
         db.add(selection)
 
-        # ── Обновляем позицию — сразу помечаем как обработанную ────────────────
-        enstru_obj = db.query(Enstru).filter(Enstru.code == enstru_code).first()
-        item.enstru_code = enstru_code
-        item.enstru_name = enstru_obj.name_rus if enstru_obj else None
-        item.match_type = "manual"
-        item.match_score = 100
-        item.match_reason = "Выбор аналитика из реестра КТП"
+        # ── Обновляем позицию ───────────────────────────────────────────────────
+        # Для авто-позиций match_type и enstru_code оставляем как есть —
+        # авто-сопоставление по АГСК сохраняется, выбор аналитика дополняет его.
+        if item.match_type != 'auto_ktp':
+            enstru_obj = db.query(Enstru).filter(Enstru.code == enstru_code).first()
+            item.enstru_code = enstru_code
+            item.enstru_name = enstru_obj.name_rus if enstru_obj else None
+            item.match_type = "manual"
+            item.match_score = 100
+            item.match_reason = "Выбор аналитика из реестра КТП"
 
         db.commit()
         db.refresh(selection)
         return selection
+
+    def get_document_stats(self, db: Session, doc_id: int) -> dict:
+        # ── Агрегат по item_type ─────────────────────────────────────────────
+        rows = (
+            db.query(
+                PsdDocumentItem.item_type,
+                func.count(PsdDocumentItem.id).label("cnt"),
+                func.coalesce(func.sum(PsdDocumentItem.total_amount), 0).label("amount"),
+            )
+            .filter(PsdDocumentItem.document_id == doc_id)
+            .group_by(PsdDocumentItem.item_type)
+            .all()
+        )
+
+        by_type: dict = {}
+        total_amount = 0.0
+        total_items = 0
+        for row in rows:
+            key = row.item_type or 'GOODS'
+            entry = by_type.setdefault(key, {"count": 0, "amount": 0.0})
+            entry["count"] += row.cnt
+            entry["amount"] += float(row.amount)
+            total_amount += float(row.amount)
+            total_items += row.cnt
+
+        # ── Кол-во сопоставленных GOODS ──────────────────────────────────────
+        goods_total = db.query(func.count(PsdDocumentItem.id)).filter(
+            PsdDocumentItem.document_id == doc_id,
+            or_(PsdDocumentItem.item_type == 'GOODS', PsdDocumentItem.item_type == None),
+        ).scalar() or 0
+
+        goods_matched = 0
+        if goods_total > 0:
+            active_subq = (
+                db.query(PsdItemSupplierSelection.item_id)
+                .filter(
+                    PsdItemSupplierSelection.status == 'active',
+                    PsdItemSupplierSelection.is_active == True,
+                )
+                .subquery()
+            )
+            unmatched = db.query(func.count(PsdDocumentItem.id)).filter(
+                PsdDocumentItem.document_id == doc_id,
+                or_(PsdDocumentItem.item_type == 'GOODS', PsdDocumentItem.item_type == None),
+                or_(PsdDocumentItem.not_in_ktp_registry == False, PsdDocumentItem.not_in_ktp_registry == None),
+                ~PsdDocumentItem.id.in_(active_subq),
+                PsdDocumentItem.match_type != 'auto_ktp',
+            ).scalar() or 0
+            goods_matched = goods_total - unmatched
+
+        # ── Расчёт среднего взвешенного ВЦ% (Вариант 2) ─────────────────────
+        # Загружаем только нужные колонки (не полные ORM-объекты)
+        item_rows = db.query(
+            PsdDocumentItem.id,
+            PsdDocumentItem.total_amount,
+            PsdDocumentItem.match_type,
+            PsdDocumentItem.code_sn,
+            PsdDocumentItem.item_type,
+        ).filter(PsdDocumentItem.document_id == doc_id).all()
+
+        # Активные выборы поставщиков через JOIN (избегаем IN с тысячами id)
+        sel_rows = db.query(
+            PsdItemSupplierSelection.item_id,
+            PsdItemSupplierSelection.dvc_percent,
+        ).join(
+            PsdDocumentItem, PsdItemSupplierSelection.item_id == PsdDocumentItem.id
+        ).filter(
+            PsdDocumentItem.document_id == doc_id,
+            PsdItemSupplierSelection.status == 'active',
+            PsdItemSupplierSelection.is_active == True,
+        ).all()
+
+        sel_dvc: Dict[int, list] = defaultdict(list)
+        for s in sel_rows:
+            if s.dvc_percent and float(s.dvc_percent) > 0:
+                sel_dvc[s.item_id].append(float(s.dvc_percent))
+
+        # Bulk-запрос КТП для авто-позиций (один запрос по GIN-индексу)
+        auto_codes = list({r.code_sn for r in item_rows
+                           if r.match_type == 'auto_ktp' and r.code_sn})
+        agsk_dvc_map: Dict[str, list] = {}
+        if auto_codes:
+            _active = Reestr_KTP.is_active.isnot(False)
+            ktp_rows = db.query(
+                Reestr_KTP.agsk3_codes,
+                Reestr_KTP.dvc_percent,
+            ).filter(
+                _active,
+                or_(*[Reestr_KTP.agsk3_codes.contains([c]) for c in auto_codes])
+            ).all()
+            auto_set = set(auto_codes)
+            for ktp in ktp_rows:
+                if not ktp.dvc_percent or not ktp.agsk3_codes:
+                    continue
+                try:
+                    v = float(re.sub(r'[^0-9.]', '', str(ktp.dvc_percent)).replace(',', '.'))
+                    if v <= 0:
+                        continue
+                except Exception:
+                    continue
+                for ac in ktp.agsk3_codes:
+                    if ac in auto_set:
+                        agsk_dvc_map.setdefault(ac, []).append(v)
+
+        # ВЦ% по товарам: sum(total_amount * dvc для GOODS) / sum(total_amount GOODS) * 100
+        goods_total_d = Decimal('0')
+        goods_vc_d = Decimal('0')
+        for r in item_rows:
+            itype = r.item_type or 'GOODS'
+            if itype not in ('GOODS', None):  # только ТОВАРЫ
+                continue
+            i_total = Decimal(str(r.total_amount or 0))
+            vals = list(sel_dvc.get(r.id, []))
+            if r.match_type == 'auto_ktp' and r.code_sn:
+                vals.extend(agsk_dvc_map.get(r.code_sn, []))
+            dvc_p = Decimal(str(min(vals))) if vals else Decimal('0')
+            goods_total_d += i_total
+            goods_vc_d += i_total * (dvc_p / 100)
+
+        goods_dvc_percent = (goods_vc_d / goods_total_d * 100) if goods_total_d > 0 else Decimal('0')
+
+        return {
+            "total_items": total_items,
+            "total_amount": total_amount,
+            "by_type": by_type,
+            "goods_total": goods_total,
+            "goods_matched": goods_matched,
+            "goods_dvc_percent": float(goods_dvc_percent),
+            "goods_vc_amount": float(goods_vc_d),
+        }
 
     def remove_supplier_selection(self, db: Session, sel_id: int, analyst_id: int) -> None:
         """Аналитик удаляет свой выбор поставщика.
@@ -246,14 +381,14 @@ class PsdItemsMixin:
         sel.is_active = False
         db.flush()
 
-        # Откатываем match_type если больше нет активных выборов
+        # Откатываем match_type только для не-авто позиций (авто остаётся авто всегда)
         remaining = db.query(PsdItemSupplierSelection).filter(
             PsdItemSupplierSelection.item_id == item_id,
             PsdItemSupplierSelection.is_active == True,
         ).count()
         if remaining == 0:
             item = db.query(PsdDocumentItem).filter(PsdDocumentItem.id == item_id).first()
-            if item:
+            if item and item.match_type != 'auto_ktp':  # авто-позиция остаётся auto_ktp
                 item.match_type = 'suggested' if item.enstru_code else 'none'
                 item.match_reason = 'Подсказка из библиотеки — поставщик удалён, выберите нового из реестра КТП'
 

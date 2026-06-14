@@ -13,7 +13,6 @@ import {
   LibraryBooks as LibraryBooksIcon, Close as CloseIcon,
   Save as SaveIcon, Business as BusinessIcon
 } from '@mui/icons-material';
-import Header from '../components/Header';
 import {
   getOked, getKpved, getTnved, getEnstru, getAgsk, searchKtpAdvanced,
   getProductGroups, getProductGroup, createProductGroup, updateProductGroup, deleteProductGroup
@@ -681,8 +680,6 @@ const KtpSearchPage: React.FC = () => {
 
   return (
     <Box sx={{ bgcolor: '#f8f9fa', minHeight: '100vh' }}>
-      <Header />
-
       <Box sx={{ p: 3 }}>
         {/* Заголовок */}
         <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>

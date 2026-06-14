@@ -66,6 +66,19 @@ class PsdExportMixin:
             db, agsk_codes, enstru_codes_set
         )
 
+        # Активные выборы поставщиков аналитиком по всем позициям документа.
+        # Нужны и для листа 1 (колонка «КТП», расчёт ВЦ%), и для листа 2.
+        all_item_ids = [item.id for item, _ in items_data]
+        selections_by_item: Dict[int, list] = defaultdict(list)
+        if all_item_ids:
+            for sel in db.query(PsdItemSupplierSelection).filter(
+                PsdItemSupplierSelection.item_id.in_(all_item_ids),
+                PsdItemSupplierSelection.status == 'active',
+                PsdItemSupplierSelection.is_active == True,
+            ).all():
+                selections_by_item[sel.item_id].append(sel)
+        items_with_selection = set(selections_by_item.keys())
+
         wb = openpyxl.Workbook()
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="1B5E20", end_color="1B5E20", fill_type="solid")
@@ -140,13 +153,26 @@ class PsdExportMixin:
             for idx, (item, agsk) in enumerate(section_items, 1):
                 itype = item.item_type or 'GOODS'
                 num_label = f"{idx} {type_letters.get(itype, 'П')}"
-                dvc_p = self._calc_min_dvc(item, direct_ktp_map, group_ktp_map, suppliers_by_enstru, agsk_all_map)
+                dvc_p = self._calc_min_dvc(
+                    item, direct_ktp_map, group_ktp_map, suppliers_by_enstru,
+                    agsk_all_map, selections_by_item,
+                )
                 i_total = Decimal(str(item.total_amount or 0))
                 vc_a = i_total * (dvc_p / 100)
                 section_total += i_total
                 section_vc += vc_a
                 dvc_pct_sum += dvc_p
                 dvc_pct_count += 1
+
+                # Колонка «КТП»: «Да» только когда есть реальное сопоставление —
+                # авто (АГСК прямо в реестре КТП) ИЛИ аналитик явно выбрал поставщика.
+                # Подсказка (suggested) и none → «Нет». Для работ/услуг КТП не применяется.
+                if itype in ('WORKS', 'SERVICES'):
+                    ktp_flag = "—"
+                elif item.match_type == 'auto_ktp' or item.id in items_with_selection:
+                    ktp_flag = "Да"
+                else:
+                    ktp_flag = "Нет"
 
                 row_data = [
                     num_label,
@@ -157,7 +183,7 @@ class PsdExportMixin:
                     float(item.price or 0),
                     float(i_total),
                     item.code_sn or "",
-                    "Да" if item.match_type != 'none' else ("100%" if itype in ('WORKS', 'SERVICES') else "Нет"),
+                    ktp_flag,
                     float(dvc_p),
                     float(vc_a)
                 ]
@@ -172,8 +198,9 @@ class PsdExportMixin:
                         cell.fill = row_fill
                 curr_row += 1
 
-            # Итог секции — простое арифметическое среднее ВЦ% (все позиции, включая 0)
-            avg_dvc_sec = dvc_pct_sum / dvc_pct_count if dvc_pct_count > 0 else Decimal('0')
+            # Итог секции — взвешенный ВЦ%: сумма ВЦ ₸ / сумма позиций ₸
+            # (доля ВЦ от общей суммы, а не среднее по процентам позиций).
+            avg_dvc_sec = (section_vc / section_total * 100) if section_total > 0 else Decimal('0')
             ws.merge_cells(f'A{curr_row}:F{curr_row}')
             c = ws.cell(row=curr_row, column=1, value=f"Итого по {section_title.lower()}:")
             c.font = Font(bold=True)
@@ -225,8 +252,8 @@ class PsdExportMixin:
             total_dvc_pct_count += sec_dvc_count
             is_first = False
 
-        # Общий итог — простое арифметическое среднее ВЦ% по всем позициям
-        avg_total_dvc = total_dvc_pct_sum / total_dvc_pct_count if total_dvc_pct_count > 0 else Decimal('0')
+        # Общий итог — взвешенный ВЦ%: сумма ВЦ ₸ / общая сумма сметы ₸
+        avg_total_dvc = (total_vc_sum / total_sum * 100) if total_sum > 0 else Decimal('0')
         ws1.merge_cells(f'A{curr_row}:F{curr_row}')
         ws1.cell(row=curr_row, column=1, value="ИТОГО ПО СМЕТЕ:").font = Font(bold=True, size=11)
         ws1.cell(row=curr_row, column=1).alignment = Alignment(horizontal='right')
@@ -397,6 +424,17 @@ class PsdExportMixin:
             db, agsk_codes_doc, enstru_codes_doc
         )
 
+        # Активные выборы поставщиков аналитиком (для корректного ВЦ% по выборам)
+        doc_item_ids = [it.id for it in items]
+        selections_by_item: Dict[int, list] = defaultdict(list)
+        if doc_item_ids:
+            for sel in db.query(PsdItemSupplierSelection).filter(
+                PsdItemSupplierSelection.item_id.in_(doc_item_ids),
+                PsdItemSupplierSelection.status == 'active',
+                PsdItemSupplierSelection.is_active == True,
+            ).all():
+                selections_by_item[sel.item_id].append(sel)
+
         goods_amount = Decimal('0')
         works_amount = Decimal('0')
         services_amount = Decimal('0')
@@ -413,7 +451,10 @@ class PsdExportMixin:
         for it in items:
             itype = it.item_type or 'GOODS'
             i_total = Decimal(str(it.total_amount or 0))
-            dvc = self._calc_min_dvc(it, direct_ktp_map, group_ktp_map, suppliers_map, agsk_all_map_doc)
+            dvc = self._calc_min_dvc(
+                it, direct_ktp_map, group_ktp_map, suppliers_map,
+                agsk_all_map_doc, selections_by_item,
+            )
             vc_part = i_total * (dvc / 100)
             total_dvc_sum += dvc
             total_dvc_count += 1
@@ -436,11 +477,11 @@ class PsdExportMixin:
                 other_amount += i_total
             total_vc_amount += vc_part
 
-        # Простое арифметическое среднее (все позиции включая 0)
-        avg_vc_percent = total_dvc_sum / total_dvc_count if total_dvc_count > 0 else Decimal('0')
-        goods_avg_dvc = goods_dvc_sum / goods_dvc_count if goods_dvc_count > 0 else Decimal('0')
-        works_avg_dvc = works_dvc_sum / works_dvc_count if works_dvc_count > 0 else Decimal('0')
-        services_avg_dvc = services_dvc_sum / services_dvc_count if services_dvc_count > 0 else Decimal('0')
+        # Взвешенный ВЦ%: доля суммы ВЦ ₸ от общей суммы ₸ (не среднее по процентам)
+        avg_vc_percent = (total_vc_amount / Decimal(str(total_amount)) * 100) if total_amount and Decimal(str(total_amount)) > 0 else Decimal('0')
+        goods_avg_dvc = (goods_vc / goods_amount * 100) if goods_amount > 0 else Decimal('0')
+        works_avg_dvc = (works_vc / works_amount * 100) if works_amount > 0 else Decimal('0')
+        services_avg_dvc = (services_vc / services_amount * 100) if services_amount > 0 else Decimal('0')
 
         doc = Document()
         title = doc.add_heading('ЗАКЛЮЧЕНИЕ АНАЛИТИКА ДРВЦ', 0)

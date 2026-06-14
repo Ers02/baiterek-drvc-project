@@ -12,7 +12,6 @@ import {
   Autocomplete, Stack, FormControlLabel, Checkbox, Divider, Tooltip, Grid
 } from '@mui/material';
 import { useTranslation } from '../i18n/index.tsx';
-import Header from '../components/Header';
 import KatoModalSelect from '../components/KatoModalSelect';
 import {
   getPlanById, updateItem, addItemToPlan, getEnstru, getCostItems,
@@ -86,7 +85,7 @@ export default function PlanItemForm() {
               itemData.agsk = PRICE_LIST_AGSK_OPTION;
             }
           }
-          
+
           setFormData(itemData);
           setEnstruSelected(true);
           if (itemData.version.status !== PlanStatus.DRAFT) {
@@ -158,7 +157,7 @@ export default function PlanItemForm() {
 
   const handleSave = async () => {
     if (isFormLocked) return;
-    
+
     // Валидация обязательных полей
     let formError = '';
 
@@ -173,7 +172,7 @@ export default function PlanItemForm() {
     else if (showAgskField && !formData.agsk) formError = t('error_agsk_required_for_smr');
     else if (!formData.quantity || Number(formData.quantity) <= 0) formError = t('error_quantity_required');
     else if (!formData.price_per_unit || Number(formData.price_per_unit) <= 0) formError = t('error_price_required');
-    
+
     // Валидация доли местного содержания
     if (!isGoods) {
         if (formData.resident_share === undefined || formData.resident_share === null) {
@@ -220,8 +219,8 @@ export default function PlanItemForm() {
     }
   };
 
-  const itemTotal = useMemo(() => 
-    (Number(formData.quantity) || 0) * (Number(formData.price_per_unit) || 0), 
+  const itemTotal = useMemo(() =>
+    (Number(formData.quantity) || 0) * (Number(formData.price_per_unit) || 0),
   [formData.quantity, formData.price_per_unit]);
 
   // Функция для отображения типа потребности
@@ -232,11 +231,10 @@ export default function PlanItemForm() {
       return typeName;
   };
 
-  if (loading) return <><Header /><CircularProgress /></>;
+  if (loading) return <CircularProgress />;
 
   return (
     <>
-      <Header />
       <Box sx={{ p: 4, maxWidth: 'lg', mx: 'auto' }}>
         <Paper sx={{ p: 5 }}>
           <Typography variant="h5" gutterBottom>{isEditMode ? t('item_form_edit_title') : t('item_form_new_title')}</Typography>

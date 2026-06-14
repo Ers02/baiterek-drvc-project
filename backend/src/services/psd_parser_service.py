@@ -254,7 +254,7 @@ class PsdParserMixin:
                 document_id=doc_id,
                 position_number=str(idx),
                 name=name,
-                code_sn=code if code and code != 'БАЛАНС' else None,
+                code_sn=code if (code and code != 'БАЛАНС') else ('Прайс-лист' if itype == 'GOODS' else None),
                 unit=str(row['unit']),
                 volume=row['vol'],
                 price=float(row['price']),
@@ -354,7 +354,7 @@ class PsdParserMixin:
                 total_amount=total_amount,
                 clean_name=name.split('/')[0].strip() if '/' in name else name,
                 is_product=True,
-                item_type='GOODS',   # явно: смета содержит ТОВАРЫ — иначе фронт не покажет кнопку «Выбрать поставщика»
+                item_type='GOODS',
                 enstru_code=enstru_code,
                 enstru_name=enstru_name_map.get(enstru_code) if enstru_code else None,
                 match_type="suggested" if has_supplier_in_ktp else "none",

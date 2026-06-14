@@ -58,11 +58,11 @@ export default function UploadDialog({open, onClose, onSubmit, loading}: Props) 
                     startIcon={<UploadIcon/>}
                     sx={{py: 2, borderStyle: 'dashed'}}
                 >
-                    {file ? file.name : 'Выбрать файл .kenml / .zip'}
+                    {file ? file.name : 'Выбрать файл .kenml / .zip / .xlsx'}
                     <input
                         type="file"
                         hidden
-                        accept=".kenml,.zip"
+                        accept=".kenml,.zip,.xlsx"
                         onChange={(e) => setFile(e.target.files?.[0] || null)}
                     />
                 </Button>
